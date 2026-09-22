@@ -1,0 +1,6 @@
+Plaintext
+streamlit
+google-genai
+pandas
+openpyxl
+Pillow
