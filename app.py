@@ -49,18 +49,34 @@ if uploaded_file and api_key:
                 4. 回傳格式請嚴格遵守純 JSON Array 格式，不要包含 Markdown 標記（如 ```json ）。
                 """
 
-                # 相容且可用的最新模型備援清單
-                models_to_try = [
-                    "gemini-1.5-flash",
-                    "gemini-3.1-pro-preview",
-                    "gemini-1.5-pro",
-                ]
-                
+                # 動態獲取該 API Key 支援的所有可產生內容的模型
+                available_models = []
+                try:
+                    for m in client.models.list():
+                        # 過濾出支援 generateContent 的模型名稱
+                        if hasattr(m, 'supported_generation_methods') and 'generateContent' in m.supported_generation_methods:
+                            name = m.name.replace('models/', '')
+                            available_models.append(name)
+                        elif not hasattr(m, 'supported_generation_methods'):
+                            name = m.name.replace('models/', '')
+                            available_models.append(name)
+                except Exception:
+                    # 若無法動態取得，則提供最主流安全的預設名稱
+                    available_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
+
+                # 優先排序：Flash 系列優先（速度快且限制較鬆），再來是其他模型
+                flash_models = [m for m in available_models if 'flash' in m.lower()]
+                other_models = [m for m in available_models if 'flash' not in m.lower()]
+                models_to_try = flash_models + other_models
+
+                if not models_to_try:
+                    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
+
                 response = None
                 last_error = None
 
                 for model_name in models_to_try:
-                    for attempt in range(2):  # 每個模型最多重試 2 次 (應對 503)
+                    for attempt in range(2):  # 每個模型嘗試最多 2 次
                         try:
                             response = client.models.generate_content(
                                 model=model_name,
@@ -73,13 +89,14 @@ if uploaded_file and api_key:
                                 break
                         except Exception as e:
                             last_error = e
-                            if "503" in str(e):
-                                time.sleep(2)  # 503 時等待 2 秒再試
+                            err_msg = str(e)
+                            if "503" in err_msg or "UNAVAILABLE" in err_msg or "429" in err_msg:
+                                time.sleep(2)  # 503/429 忙碌限流時等待 2 秒再重試
                                 continue
                             else:
-                                break  # 若非 503 錯誤（例如模型名稱不存在），直接跳下一個模型
+                                break  # 其他錯誤（如 404）跳過直接試下一個模型
                     if response and response.text:
-                        break  # 成功取得回應則跳出模型迴圈
+                        break  # 成功取得解析結果，跳出模型嘗試迴圈
 
                 if not response or not response.text:
                     raise last_error
