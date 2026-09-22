@@ -8,7 +8,7 @@ from google.genai import types
 
 st.set_page_config(page_title="發票與 Packing List 自動解析工具", layout="wide")
 
-st.title("📄 發票與 Packing List 自動解析工具")
+st.title("📄 力智發票與 Packing List 自動解析工具")
 st.caption("上傳 PDF 或圖片檔，自動解析明細並將 INVOICE 與 PACKING LIST 分頁匯出至 Excel（數值已優化為純數字格式）。")
 
 # 讀取 Secrets 中的 API Key
