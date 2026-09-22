@@ -9,7 +9,7 @@ from google.genai import types
 st.set_page_config(page_title="發票與 Packing List 自動解析工具", layout="wide")
 
 st.title("📄 發票與 Packing List 自動解析工具")
-st.caption("上傳 PDF 或圖片檔，自動解析明細與總重，並導出 12 欄標準 Excel 格式。")
+st.caption("上傳 PDF 或圖片檔，自動解析明細，區分 INVOICE 與 PACKING LIST 並導出 13 欄標準 Excel 格式。")
 
 # 讀取 Secrets 中的 API Key
 api_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -21,7 +21,7 @@ uploaded_file = st.file_uploader("選擇 PDF 或圖片檔案", type=["pdf", "png
 
 if uploaded_file and api_key:
     if st.button("🚀 開始解析", type="primary"):
-        with st.spinner("AI 正在深度解析文件細節與重量資料中，請稍候..."):
+        with st.spinner("AI 正在深度解析文件細節、區分單據類型中，請稍候..."):
             try:
                 client = genai.Client(api_key=api_key)
                 file_bytes = uploaded_file.read()
@@ -30,26 +30,34 @@ if uploaded_file and api_key:
                 prompt = """
                 請解析這份半導體/電子零件發票或 Packing List，將每個品項明細抽取出來，並嚴格以 JSON Array 格式回傳。
                 
-                必須精準包含以下 12 個欄位（欄位名稱請完全一致）：
-                1. "頁碼"
-                2. "發票號碼"
-                3. "型號"
-                4. "封裝規格"
-                5. "PO單號"
-                6. "項次"
-                7. "數量"
-                8. "單價"
-                9. "總價"
-                10. "發票總金額"
-                11. "總 GW (KGS)"
-                12. "總 NW (KGS)"
+                必須精準包含以下 13 個欄位（欄位名稱請完全一致）：
+                1. "單據類型"
+                2. "頁碼"
+                3. "發票號碼/單號"
+                4. "型號"
+                5. "封裝規格"
+                6. "PO單號"
+                7. "項次"
+                8. "數量"
+                9. "單價"
+                10. "總價"
+                11. "發票總金額"
+                12. "總 GW (KGS)"
+                13. "總 NW (KGS)"
 
-                解析規則：
-                1. 每個品項都要拆成獨立的一行（No merged rows）。
-                2. 「發票總金額」、「總 GW (KGS)」、「總 NW (KGS)」為全域統計數值，請從文件頁尾或總計處提取。
-                3. 「發票總金額」、「總 GW (KGS)」、「總 NW (KGS)」只顯示在該張文件最後一個項次那一列，其餘明細列設為 null 或空字串（避免重複加總）。如果文件沒有提及重量，則填寫空字串。
-                4. 數量、單價、總價、重量等數值欄位請保留純數字或標準數字格式（例：12.50）。
-                5. 回傳格式請嚴格遵守純 JSON Array 格式，不要包含 Markdown 標記（如 ```json ）。
+                解析與分類規則（極重要）：
+                1. 「單據類型」請填寫 "INVOICE" 或 "PACKING LIST"。
+                2. 「發票號碼/單號」：
+                   - 若為 INVOICE，填寫 Invoice No.（例：1S555-260800073）。
+                   - 若為 PACKING LIST，填寫 LIST NO 或 PACKING NO（例：PACKING-26820664 或 LIST NO: 26820664）。
+                3. 若該列為 INVOICE：
+                   - 請解析單價、總價，並在最後一列填寫「發票總金額」。
+                   - 「總 GW (KGS)」與「總 NW (KGS)」請填寫空字串 ""。
+                4. 若該列為 PACKING LIST：
+                   - 「單價」、「總價」、「發票總金額」請填寫空字串 ""。
+                   - 請從該 Packing List 頁尾或總計處提取「總 GW (KGS)」與「總 NW (KGS)」，並僅顯示在該張 Packing List 的最後一個項次那一列。
+                5. 每個品項都要拆成獨立的一行（No merged rows）。
+                6. 回傳格式請嚴格遵守純 JSON Array 格式，不要包含 Markdown 標記（如 ```json ）。
                 """
 
                 # 動態獲取該 API Key 支援的所有可產生內容的模型
@@ -108,9 +116,9 @@ if uploaded_file and api_key:
                 data = json.loads(clean_json)
                 df = pd.DataFrame(data)
 
-                # 固定 12 欄順序
+                # 固定 13 欄順序
                 expected_cols = [
-                    "頁碼", "發票號碼", "型號", "封裝規格", "PO單號", 
+                    "單據類型", "頁碼", "發票號碼/單號", "型號", "封裝規格", "PO單號", 
                     "項次", "數量", "單價", "總價", "發票總金額",
                     "總 GW (KGS)", "總 NW (KGS)"
                 ]
@@ -125,7 +133,7 @@ if uploaded_file and api_key:
                 # 匯出為 Excel 檔案
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    df.to_excel(writer, index=False, sheet_name="Packing_List_Parsed")
+                    df.to_excel(writer, index=False, sheet_name="Parsed_Data")
                 excel_data = output.getvalue()
 
                 st.download_button(
@@ -134,7 +142,7 @@ if uploaded_file and api_key:
                     file_name=f"Parsed_{uploaded_file.name}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
-                st.success("解析成功！已包含 12 欄明細與重量數據。")
+                st.success("解析成功！已成功分開 INVOICE 與 PACKING LIST 資料。")
 
             except Exception as e:
                 st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
