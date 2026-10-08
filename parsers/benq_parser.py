@@ -1,4 +1,3 @@
-from datetime import datetime
 import io
 import pandas as pd
 
@@ -41,6 +40,24 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
             return "MTR" if u_str in ["M", "MTR"] else u_str
 
         df["*Unit"] = df["*Unit"].apply(fix_unit)
+
+    # -------------------------------------------------------------
+    # ⚡ 排序調整：有 BOM No 的項次往前放，無 BOM No 往後放
+    # -------------------------------------------------------------
+    if "BOM No" in df.columns:
+        # 建立輔助判斷欄位：有 BOM No 設為 0（排前面），沒有（None/空值）設為 1（排後面）
+        df["_has_bom"] = df["BOM No"].apply(
+            lambda x: 1 if (pd.isna(x) or str(x).strip() == "" or x is None) else 0
+        )
+        
+        # 依照是否有 BOM No 進行排序
+        df = df.sort_values(by=["_has_bom"]).reset_index(drop=True)
+        
+        # 重新整理「*出口項次」（1, 2, 3, ...）
+        df["*出口項次"] = range(1, len(df) + 1)
+        
+        # 移除臨時欄位
+        df = df.drop(columns=["_has_bom"])
 
     df = df[compare_cols]
 
