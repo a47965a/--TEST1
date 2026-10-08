@@ -1,23 +1,33 @@
-import streamlit as st
-import pandas as pd
-import json
 import io
+import json
 import time
+from datetime import datetime
 from google import genai
 from google.genai import types
+import openpyxl
+import pandas as pd
+import streamlit as st
 
-st.set_page_config(page_title="發票與 Packing List 自動解析工具", layout="wide")
+# 1. 頁面基本設定
+st.set_page_config(
+    page_title="多客戶 Shipping Docs AI 自動解析與報單比對工具",
+    layout="wide",
+)
 
-st.title("📄 力智 Invoice 與 Packing List 自動解析工具")
-st.caption("上傳 PDF 或圖片檔，自動解析明細並將 INVOICE 與 PACKING LIST 分頁匯出至 Excel（數值已優化為純數字格式）。")
+st.title("📄 多客戶 Shipping Docs AI 自動解析工具")
+st.caption(
+    "支援力智 (uPI) 雙頁籤 Invoice/Packing 處理，以及 BENQ 等標準 17 欄位報單比對自動生成。"
+)
 
-# 讀取 Secrets 中的 API Key
+# 讀取 Secrets 中的 API Key，若無則從 Sidebar 輸入
 api_key = st.secrets.get("GEMINI_API_KEY", "")
-
 if not api_key:
     api_key = st.sidebar.text_input("輸入 Gemini API Key", type="password")
 
-uploaded_file = st.file_uploader("選擇 PDF 或圖片檔案", type=["pdf", "png", "jpg", "jpeg"])
+uploaded_file = st.file_uploader(
+    "選擇 PDF 或圖片檔案", type=["pdf", "png", "jpg", "jpeg"]
+)
+
 
 def clean_numeric(val):
     """清理逗號並轉為純數字，若無法轉換則回傳 None (Excel 空白)"""
@@ -25,77 +35,122 @@ def clean_numeric(val):
         return None
     if isinstance(val, (int, float)):
         return val
-    # 移除逗號與多餘空白
     cleaned_str = str(val).replace(",", "").strip()
     try:
-        # 優先嘗試轉為浮點數或整數
         num = float(cleaned_str)
         return int(num) if num.is_integer() else num
     except ValueError:
         return val
 
+
 if uploaded_file and api_key:
     if st.button("🚀 開始解析", type="primary"):
-        with st.spinner("AI 正在深度解析文件，並依 INVOICE 與 PACKING 分頁處理中..."):
+        with st.spinner("AI 正在自動識別文件類型並提取資料中..."):
             try:
                 client = genai.Client(api_key=api_key)
                 file_bytes = uploaded_file.read()
                 mime_type = uploaded_file.type
+                upload_date_str = datetime.now().strftime("%Y/%m/%d")
 
-                prompt = """
-                請解析這份半導體/電子零件文件，將 INVOICE 與 PACKING LIST 的明細資料分開擷取，並回傳格式嚴格為包含兩個 key 的 JSON Object：
-                {
-                  "invoice_data": [ ... ],
-                  "packing_data": [ ... ]
-                }
+                # 整合 Prompt：自動判斷文件類別並套用對應擷取規則
+                prompt = f"""
+                你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
+                請閱讀這份文件，首先判斷文件屬於哪種格式 (document_type)：
 
-                1. "invoice_data"（發票明細陣列），每筆資料必須包含以下欄位：
-                   - "頁碼"
-                   - "發票號碼"
-                   - "型號"
-                   - "封裝規格"
-                   - "PO單號"
-                   - "項次"
-                   - "數量"
-                   - "單價"
-                   - "總價"
-                   - "發票總金額" (僅在該張 Invoice 的最後一筆明細顯示總額，其餘為 null 或空字串)
+                【格式 A：BENQ_COMPARE】
+                若為 BENQ (明基材料) 的 Commercial Invoice (含有 GOODS NO, 偏光片規格如 M315/M240, 或 (91.xxx) 格式料號)：
+                請回傳 JSON Object，格式如下：
+                {{
+                  "document_type": "BENQ_COMPARE",
+                  "compare_data": [
+                    {{
+                      "*貨物編號": "頁面頂部 GOODS NO (如 CB9PF260768)",
+                      "*出口項次": 1,
+                      "*出口報單號碼": null,
+                      "*報關日期": "{upload_date_str}",
+                      "Item No": "UNIT PRICE 正下方括號內文字 (如 91.4A311.020.161)",
+                      "*Item Description": "僅保留中間規格描述 (如 B/MN/AUO/31.5/M315QAN01.0/Z-TAC_PET/TLN/161)，嚴格刪除 'Polarizer Film' 及 'C/No:' 以下的所有文字",
+                      "*Unit": "單位一律轉大寫 (如 PCS, MTR)",
+                      "*Quantity": 數量數字,
+                      "*統計方式": null,
+                      "*匯率": null,
+                      "核銷進口報單號碼": null,
+                      "進口項次": null,
+                      "BOM No": "BOM No. 文字 (如 C0115029913)",
+                      "保稅": null,
+                      "監管編號": "C5790",
+                      "報單類別": null,
+                      "單價": 單價數字
+                    }}
+                  ]
+                }}
 
-                2. "packing_data"（裝箱單明細陣列），每筆資料必須包含以下欄位：
-                   - "頁碼"
-                   - "LIST NO/單號" (填寫 Packing List No. 或 Packing No.)
-                   - "型號"
-                   - "封裝規格"
-                   - "PO單號"
-                   - "項次"
-                   - "數量"
-                   - "總 GW (KGS)" (僅在該張 Packing List 的最後一筆明細顯示，其餘為 null 或空字串)
-                   - "總 NW (KGS)" (僅在該張 Packing List 的最後一筆明細顯示，其餘為 null 或空字串)
+                【格式 B：UPI_SEMICONDUCTOR】
+                若為力智 (uPI) 或一般半導體/IC 廠商的 Invoice / Packing List：
+                請將 INVOICE 與 PACKING LIST 明細資料分開擷取，回傳 JSON Object 格式如下：
+                {{
+                  "document_type": "UPI_SEMICONDUCTOR",
+                  "invoice_data": [
+                    {{
+                      "頁碼": "...",
+                      "發票號碼": "...",
+                      "型號": "...",
+                      "封裝規格": "...",
+                      "PO單號": "...",
+                      "項次": "...",
+                      "數量": 數字,
+                      "單價": 數字,
+                      "總價": 數字,
+                      "發票總金額": 數字(僅在最後一筆顯示)
+                    }}
+                  ],
+                  "packing_data": [
+                    {{
+                      "頁碼": "...",
+                      "LIST NO/單號": "...",
+                      "型號": "...",
+                      "封裝規格": "...",
+                      "PO單號": "...",
+                      "項次": "...",
+                      "數量": 數字,
+                      "總 GW (KGS)": 數字(僅在最後一筆顯示),
+                      "總 NW (KGS)": 數字(僅在最後一筆顯示)
+                    }}
+                  ]
+                }}
 
                 注意事項：
-                - 每個品項都要拆成獨立的一行（No merged rows）。
-                - 數量、單價、總價、重量等欄位請盡量回傳純數字（不要加逗號千分位）。
-                - 請勿混淆 Invoice 與 Packing List 的數據。
-                - 回傳格式請嚴格遵守純 JSON Object 格式，不要包含 Markdown 標記（如 ```json ）。
+                - 數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。
+                - 請嚴格回傳純 JSON Object，不要包含 Markdown 標記 (如 ```json )。
                 """
 
                 # 動態獲取該 API Key 支援的模型
                 available_models = []
                 try:
                     for m in client.models.list():
-                        if hasattr(m, 'supported_generation_methods') and 'generateContent' in m.supported_generation_methods:
-                            name = m.name.replace('models/', '')
+                        if (
+                            hasattr(m, "supported_generation_methods")
+                            and "generateContent"
+                            in m.supported_generation_methods
+                        ):
+                            name = m.name.replace("models/", "")
                             available_models.append(name)
-                        elif not hasattr(m, 'supported_generation_methods'):
-                            name = m.name.replace('models/', '')
+                        elif not hasattr(m, "supported_generation_methods"):
+                            name = m.name.replace("models/", "")
                             available_models.append(name)
                 except Exception:
-                    available_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
+                    available_models = [
+                        "gemini-2.5-flash",
+                        "gemini-2.0-flash",
+                    ]
 
-                flash_models = [m for m in available_models if 'flash' in m.lower()]
-                other_models = [m for m in available_models if 'flash' not in m.lower()]
+                flash_models = [
+                    m for m in available_models if "flash" in m.lower()
+                ]
+                other_models = [
+                    m for m in available_models if "flash" not in m.lower()
+                ]
                 models_to_try = flash_models + other_models
-
                 if not models_to_try:
                     models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
@@ -108,7 +163,9 @@ if uploaded_file and api_key:
                             response = client.models.generate_content(
                                 model=model_name,
                                 contents=[
-                                    types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
+                                    types.Part.from_bytes(
+                                        data=file_bytes, mime_type=mime_type
+                                    ),
                                     prompt,
                                 ],
                             )
@@ -117,7 +174,11 @@ if uploaded_file and api_key:
                         except Exception as e:
                             last_error = e
                             err_msg = str(e)
-                            if "503" in err_msg or "UNAVAILABLE" in err_msg or "429" in err_msg:
+                            if (
+                                "503" in err_msg
+                                or "UNAVAILABLE" in err_msg
+                                or "429" in err_msg
+                            ):
                                 time.sleep(2)
                                 continue
                             else:
@@ -129,58 +190,145 @@ if uploaded_file and api_key:
                     raise last_error
 
                 clean_json = (
-                    response.text.replace("```json", "").replace("```", "").strip()
+                    response.text.replace("```json", "")
+                    .replace("```", "")
+                    .strip()
                 )
                 raw_data = json.loads(clean_json)
 
-                # 轉為 DataFrame
-                df_inv = pd.DataFrame(raw_data.get("invoice_data", []))
-                df_pack = pd.DataFrame(raw_data.get("packing_data", []))
+                doc_type = raw_data.get("document_type", "UPI_SEMICONDUCTOR")
 
-                # 確保 Invoice 欄位與順序
-                inv_cols = ["頁碼", "發票號碼", "型號", "封裝規格", "PO單號", "項次", "數量", "單價", "總價", "發票總金額"]
-                for col in inv_cols:
-                    if col not in df_inv.columns:
-                        df_inv[col] = None
-                df_inv = df_inv[inv_cols]
+                # =========================================================
+                # 處理情況 A: BENQ 報單比對 (17 欄位)
+                # =========================================================
+                if doc_type == "BENQ_COMPARE":
+                    st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
+                    compare_data = raw_data.get("compare_data", [])
+                    df_compare = pd.DataFrame(compare_data)
 
-                # 確保 Packing 欄位與順序
-                pack_cols = ["頁碼", "LIST NO/單號", "型號", "封裝規格", "PO單號", "項次", "數量", "總 GW (KGS)", "總 NW (KGS)"]
-                for col in pack_cols:
-                    if col not in df_pack.columns:
-                        df_pack[col] = None
-                df_pack = df_pack[pack_cols]
+                    compare_cols = [
+                        "*貨物編號",
+                        "*出口項次",
+                        "*出口報單號碼",
+                        "*報關日期",
+                        "Item No",
+                        "*Item Description",
+                        "*Unit",
+                        "*Quantity",
+                        "*統計方式",
+                        "*匯率",
+                        "核銷進口報單號碼",
+                        "進口項次",
+                        "BOM No",
+                        "保稅",
+                        "監管編號",
+                        "報單類別",
+                        "單價",
+                    ]
+                    for col in compare_cols:
+                        if col not in df_compare.columns:
+                            df_compare[col] = None
+                    df_compare = df_compare[compare_cols]
 
-                # --- 數值欄位轉為純數字型態 ---
-                inv_num_cols = ["數量", "單價", "總價", "發票總金額"]
-                for col in inv_num_cols:
-                    df_inv[col] = df_inv[col].apply(clean_numeric)
+                    st.subheader("📋 報單比對 17 欄位預覽")
+                    st.dataframe(df_compare, use_container_width=True)
 
-                pack_num_cols = ["數量", "總 GW (KGS)", "總 NW (KGS)"]
-                for col in pack_num_cols:
-                    df_pack[col] = df_pack[col].apply(clean_numeric)
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(
+                        output, engine="openpyxl"
+                    ) as writer:
+                        df_compare.to_excel(
+                            writer, index=False, sheet_name="GoodsCompare"
+                        )
+                    excel_data = output.getvalue()
 
-                # 畫面上預覽兩張表
-                st.subheader("🧾 Invoice（發票）解析結果預覽")
-                st.dataframe(df_inv, use_container_width=True)
+                    st.download_button(
+                        label="📥 下載報單比對 Excel (.xlsx)",
+                        data=excel_data,
+                        file_name=f"GoodsCompare_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
 
-                st.subheader("📦 Packing List（裝箱單）解析結果預覽")
-                st.dataframe(df_pack, use_container_width=True)
+                # =========================================================
+                # 處理情況 B: 力智 (uPI) / 一般半導體 (雙 Sheet 格式)
+                # =========================================================
+                else:
+                    st.success("✅ 自動辨識為 **力智/半導體** 格式！")
+                    df_inv = pd.DataFrame(raw_data.get("invoice_data", []))
+                    df_pack = pd.DataFrame(raw_data.get("packing_data", []))
 
-                # 寫入包含 2 個 Sheet 的 Excel 檔案
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    df_inv.to_excel(writer, index=False, sheet_name="Invoice")
-                    df_pack.to_excel(writer, index=False, sheet_name="Packing_List")
-                excel_data = output.getvalue()
+                    inv_cols = [
+                        "頁碼",
+                        "發票號碼",
+                        "型號",
+                        "封裝規格",
+                        "PO單號",
+                        "項次",
+                        "數量",
+                        "單價",
+                        "總價",
+                        "發票總金額",
+                    ]
+                    for col in inv_cols:
+                        if col not in df_inv.columns:
+                            df_inv[col] = None
+                    df_inv = df_inv[inv_cols]
 
-                st.download_button(
-                    label="📥 下載多頁籤 Excel 檔案 (.xlsx)",
-                    data=excel_data,
-                    file_name=f"Parsed_{uploaded_file.name}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    pack_cols = [
+                        "頁碼",
+                        "LIST NO/單號",
+                        "型號",
+                        "封裝規格",
+                        "PO單號",
+                        "項次",
+                        "數量",
+                        "總 GW (KGS)",
+                        "總 NW (KGS)",
+                    ]
+                    for col in pack_cols:
+                        if col not in df_pack.columns:
+                            df_pack[col] = None
+                    df_pack = df_pack[pack_cols]
+
+                    # 數值欄位轉純數字
+                    inv_num_cols = ["數量", "單價", "總價", "發票總金額"]
+                    for col in inv_num_cols:
+                        df_inv[col] = df_inv[col].apply(clean_numeric)
+
+                    pack_num_cols = ["數量", "總 GW (KGS)", "總 NW (KGS)"]
+                    for col in pack_num_cols:
+                        df_pack[col] = df_pack[col].apply(clean_numeric)
+
+                    st.subheader("🧾 Invoice（發票）解析結果預覽")
+                    st.dataframe(df_inv, use_container_width=True)
+
+                    st.subheader("📦 Packing List（裝箱單）解析結果預覽")
+                    st.dataframe(df_pack, use_container_width=True)
+
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(
+                        output, engine="openpyxl"
+                    ) as writer:
+                        df_inv.to_excel(
+                            writer, index=False, sheet_name="Invoice"
+                        )
+                        df_pack.to_excel(
+                            writer, index=False, sheet_name="Packing_List"
+                        )
+                    excel_data = output.getvalue()
+
+                    st.download_button(
+                        label="📥 下載多頁籤 Excel 檔案 (.xlsx)",
+                        data=excel_data,
+                        file_name=f"Parsed_{uploaded_file.name}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+                st.success(
+                    "解析成功！已依據文件格式產出對應 Excel 檔案。"
                 )
-                st.success("解析成功！數值欄位已全部轉換為純數字型態，可直接進行 Excel 加總與運算。")
 
             except Exception as e:
-                st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
+                st.error(
+                    f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}"
+                )
