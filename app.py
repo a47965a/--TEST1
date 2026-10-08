@@ -10,7 +10,7 @@ import streamlit as st
 
 # 1. 頁面基本設定
 st.set_page_config(
-    page_title="多客戶 Shipping Docs AI 自動解析與報單比對工具",
+    page_title="多客戶 Shipping Docs AI 自動解析工具",
     layout="wide",
 )
 
@@ -45,14 +45,14 @@ def clean_numeric(val):
 
 if uploaded_file and api_key:
     if st.button("🚀 開始解析", type="primary"):
-        with st.spinner("AI 正在自動識別文件類型並提取資料中..."):
+        with st.spinner("AI 正在深度解析文件，並自動辨識格式處理中..."):
             try:
                 client = genai.Client(api_key=api_key)
                 file_bytes = uploaded_file.read()
                 mime_type = uploaded_file.type
                 upload_date_str = datetime.now().strftime("%Y/%m/%d")
 
-                # 整合 Prompt
+                # 整合 Prompt：自動判斷文件類別並套用對應擷取規則
                 prompt = f"""
                 你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
                 請閱讀這份文件，首先判斷文件屬於哪種格式 (document_type)：
@@ -121,49 +121,84 @@ if uploaded_file and api_key:
 
                 注意事項：
                 - 數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。
-                - 請嚴格回傳純 JSON Object。
+                - 請嚴格回傳純 JSON Object，不要包含 Markdown 標記 (如 ```json )。
                 """
 
-                # ⚡ 自動獲取該 Key 支援的模型，避免固定的模型名稱報 404
-                models_to_try = []
+                # -------------------------------------------------------------
+                # 還原原本程式碼的「動態模型搜尋與自動降級迴圈」
+                # -------------------------------------------------------------
+                available_models = []
                 try:
                     for m in client.models.list():
-                        m_name = m.name.replace("models/", "")
-                        if "flash" in m_name.lower():
-                            models_to_try.append(m_name)
+                        m_name = (
+                            m.name.replace("models/", "")
+                            if hasattr(m, "name")
+                            else str(m)
+                        )
+                        if (
+                            hasattr(m, "supported_generation_methods")
+                            and "generateContent"
+                            in m.supported_generation_methods
+                        ):
+                            available_models.append(m_name)
+                        elif not hasattr(m, "supported_generation_methods"):
+                            available_models.append(m_name)
                 except Exception:
-                    pass
+                    available_models = [
+                        "gemini-2.5-flash",
+                        "gemini-2.0-flash",
+                        "gemini-1.5-flash",
+                    ]
 
-                # 若無法自動獲取，預設優先嘗試的模型列表
+                flash_models = [
+                    m for m in available_models if "flash" in m.lower()
+                ]
+                other_models = [
+                    m for m in available_models if "flash" not in m.lower()
+                ]
+                models_to_try = flash_models + other_models
+
                 if not models_to_try:
-                    models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+                    models_to_try = [
+                        "gemini-2.5-flash",
+                        "gemini-2.0-flash",
+                        "gemini-1.5-flash",
+                    ]
 
                 response = None
-                last_err = None
+                last_error = None
 
-                for target_model in models_to_try:
-                    try:
-                        response = client.models.generate_content(
-                            model=target_model,
-                            contents=[
-                                types.Part.from_bytes(
-                                    data=file_bytes, mime_type=mime_type
-                                ),
-                                prompt,
-                            ],
-                            config=types.GenerateContentConfig(
-                                response_mime_type="application/json",
-                                temperature=0.1,
-                            ),
-                        )
-                        if response and response.text:
-                            break
-                    except Exception as err:
-                        last_err = err
-                        continue
+                for model_name in models_to_try:
+                    for attempt in range(2):
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=[
+                                    types.Part.from_bytes(
+                                        data=file_bytes, mime_type=mime_type
+                                    ),
+                                    prompt,
+                                ],
+                            )
+                            if response and response.text:
+                                break
+                        except Exception as e:
+                            last_error = e
+                            err_msg = str(e)
+                            if (
+                                "503" in err_msg
+                                or "UNAVAILABLE" in err_msg
+                                or "429" in err_msg
+                            ):
+                                time.sleep(2)
+                                continue
+                            else:
+                                break
+                    if response and response.text:
+                        break
 
                 if not response or not response.text:
-                    raise last_err
+                    raise last_error
 
                 clean_json = (
                     response.text.replace("```json", "")
