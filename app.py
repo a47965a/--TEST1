@@ -36,8 +36,7 @@ if uploaded_file and api_key:
                 mime_type = uploaded_file.type
                 upload_date_str = datetime.now().strftime("%Y/%m/%d")
 
-                # 整合 Prompt
-               prompt = f"""
+                prompt = f"""
                 你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
                 請閱讀這份文件，判斷文件屬於哪種格式 (document_type)：
 
@@ -61,7 +60,7 @@ if uploaded_file and api_key:
                   "compare_data": [
                     {{
                       "*貨物編號": "出口字號 (如 CB9PF260768)",
-                      "*出口項次": 項次數字 (1, 2, 3, 4, 5, 6, 7...請按報單原始項次，共有 7 項),
+                      "*出口項次": 項次數字 (1, 2, 3, 4, 5, 6, 7...請按報單原始項次),
                       "*出口報單號碼": "報單號碼 (請提取 CW 150A7 14002，勿包含斜線 // )",
                       "*報關日期": "報關日期 YYYY/MM/DD (民國年請轉西元，如 115/10/08 轉為 2026/10/08)",
                       "Item No": "S/N: 後方的料號 (如 91.XA241.020.131)",
