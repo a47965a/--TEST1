@@ -34,7 +34,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
     if "*Unit" in df.columns:
 
         def fix_unit(u):
-            if not u:
+            if not u or pd.isna(u):
                 return ""
             u_str = str(u).strip().upper()
             return "MTR" if u_str in ["M", "MTR"] else u_str
@@ -42,21 +42,29 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
         df["*Unit"] = df["*Unit"].apply(fix_unit)
 
     # -------------------------------------------------------------
-    # ⚡ 排序調整：有 BOM No 的項次往前放，無 BOM No 往後放
+    # ⚡ 嚴格排序邏輯：清理字串後精準判斷 BOM No
     # -------------------------------------------------------------
     if "BOM No" in df.columns:
-        # 建立輔助判斷欄位：有 BOM No 設為 0（排前面），沒有（None/空值）設為 1（排後面）
-        df["_has_bom"] = df["BOM No"].apply(
-            lambda x: 1 if (pd.isna(x) or str(x).strip() == "" or x is None) else 0
+
+        def is_valid_bom(val):
+            if pd.isna(val) or val is None:
+                return 1  # 無 BOM 排後面
+            val_str = str(val).strip().upper()
+            if val_str in ["", "NONE", "NULL", "NAN"]:
+                return 1  # 無 BOM 排後面
+            return 0  # 有 BOM 排前面
+
+        df["_has_bom"] = df["BOM No"].apply(is_valid_bom)
+
+        # 依照是否有 BOM No 進行穩定排序 (保持同類別項目的原始相對順序)
+        df = df.sort_values(by=["_has_bom"], kind="stable").reset_index(
+            drop=True
         )
-        
-        # 依照是否有 BOM No 進行排序
-        df = df.sort_values(by=["_has_bom"]).reset_index(drop=True)
-        
+
         # 重新整理「*出口項次」（1, 2, 3, ...）
         df["*出口項次"] = range(1, len(df) + 1)
-        
-        # 移除臨時欄位
+
+        # 刪除輔助欄位
         df = df.drop(columns=["_has_bom"])
 
     df = df[compare_cols]
