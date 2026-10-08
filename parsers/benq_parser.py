@@ -42,7 +42,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
         df["*Unit"] = df["*Unit"].apply(fix_unit)
 
     # -------------------------------------------------------------
-    # ⚡ 嚴格排序邏輯：清理字串後精準判斷 BOM No
+    # ⚡ 依 Invoice 原始順序，僅將有 BOM No 項次優先往前提
     # -------------------------------------------------------------
     if "BOM No" in df.columns:
 
@@ -56,15 +56,15 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["_has_bom"] = df["BOM No"].apply(is_valid_bom)
 
-        # 依照是否有 BOM No 進行穩定排序 (保持同類別項目的原始相對順序)
+        # kind="stable" 會百分之百保留原 Invoice 的相對順序
         df = df.sort_values(by=["_has_bom"], kind="stable").reset_index(
             drop=True
         )
 
-        # 重新整理「*出口項次」（1, 2, 3, ...）
+        # 重新編號「*出口項次」（1, 2, 3, ...）
         df["*出口項次"] = range(1, len(df) + 1)
 
-        # 刪除輔助欄位
+        # 刪除臨時欄位
         df = df.drop(columns=["_has_bom"])
 
     df = df[compare_cols]
