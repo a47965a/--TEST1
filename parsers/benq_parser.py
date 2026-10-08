@@ -1,6 +1,7 @@
 import io
 import re
 import pandas as pd
+from openpyxl.styles import Alignment
 
 
 def process_benq_compare(raw_data, filename_prefix="CB9PF"):
@@ -37,13 +38,10 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
         def fix_decl_no(val):
             if pd.isna(val) or not val:
                 return ""
-            v_str = str(val).replace("/", "").strip()  # 清除斜線
+            v_str = str(val).replace("/", "").strip()
             match = re.search(r"CW\s*(\d.*)", v_str, re.IGNORECASE)
             if match:
-                clean_num = re.sub(
-                    r"\s+", "", match.group(1)
-                )  # 移除內部不規則空格
-                # 重新組合：CW + 2個空格 + 號碼
+                clean_num = re.sub(r"\s+", "", match.group(1))
                 if len(clean_num) >= 10:
                     return f"CW  {clean_num[:5]}{clean_num[5:]}"
                 return f"CW  {clean_num}"
@@ -51,7 +49,24 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["*出口報單號碼"] = df["*出口報單號碼"].apply(fix_decl_no)
 
-    # 2. 強制修正【單位】（如 m/M 轉為 MTR，其它轉大寫）
+    # 2. 強制【MADE IN】換行處理
+    if "*Item Description" in df.columns:
+
+        def fix_description(val):
+            if pd.isna(val) or not val:
+                return ""
+            v_str = str(val).strip()
+            # 若含有 MADE IN 但尚未換行，自動補上 \n
+            v_str = re.sub(
+                r"(?<!\n)(MADE\s+IN\s+[A-Za-z]+)", r"\n\1", v_str, flags=re.IGNORECASE
+            )
+            return v_str
+
+        df["*Item Description"] = df["*Item Description"].apply(
+            fix_description
+        )
+
+    # 3. 強制修正【單位】（如 m/M 轉為 MTR，其它轉大寫）
     if "*Unit" in df.columns:
 
         def fix_unit(u):
@@ -62,7 +77,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["*Unit"] = df["*Unit"].apply(fix_unit)
 
-    # 3. 強制修正【統計方式】為兩碼字串 (例如 "2" -> "02")
+    # 4. 強制修正【統計方式】為兩碼字串 (例如 "2" -> "02")
     if "*統計方式" in df.columns:
 
         def fix_stat_mode(val):
@@ -75,7 +90,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["*統計方式"] = df["*統計方式"].apply(fix_stat_mode)
 
-    # 4. 強制修正【報單類別】只保留前兩碼 (例如 "B9保稅廠產品出口" -> "B9")
+    # 5. 強制修正【報單類別】只保留前兩碼 (例如 "B9保稅廠產品出口" -> "B9")
     if "報單類別" in df.columns:
 
         def fix_doc_type(val):
@@ -87,7 +102,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["報單類別"] = df["報單類別"].apply(fix_doc_type)
 
-    # 5. 強制修正【報關日期】(若出現 115/10/08 自動轉 2026/10/08)
+    # 6. 強制修正【報關日期】(若出現 115/10/08 自動轉 2026/10/08)
     if "*報關日期" in df.columns:
 
         def fix_date(d):
@@ -105,7 +120,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["*報關日期"] = df["*報關日期"].apply(fix_date)
 
-    # 6. 強制整理【保稅】欄位
+    # 7. 強制整理【保稅】欄位
     if "保稅" in df.columns:
 
         def fix_bonded(val):
@@ -120,7 +135,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["保稅"] = df["保稅"].apply(fix_bonded)
 
-    # 7. 完全尊重原始項次順序
+    # 8. 完全尊重原始項次順序
     if "*出口項次" in df.columns and not df.empty:
         seq_list = list(range(1, len(df) + 1))
         df["*出口項次"] = pd.to_numeric(
@@ -129,9 +144,18 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
     df = df[compare_cols]
 
-    # 產出 Excel Buffer
+    # 產出 Excel Buffer，並設定自動換行格式
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="GoodsCompare")
+        workbook = writer.book
+        worksheet = writer.sheets["GoodsCompare"]
+
+        # 將品名欄位（F欄，第 6 欄）設定自動換行 (wrap_text=True)
+        for row in worksheet.iter_rows(
+            min_row=2, max_row=len(df) + 1, min_col=6, max_col=6
+        ):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="center")
 
     return df, output.getvalue()
