@@ -124,4 +124,109 @@ if uploaded_file and api_key:
                         ):
                             available_models.append(m_name)
                         elif not hasattr(m, "supported_generation_methods"):
-                            available_models
+                            available_models.append(m_name)
+                except Exception:
+                    available_models = [
+                        "gemini-2.5-flash",
+                        "gemini-2.0-flash",
+                        "gemini-1.5-flash",
+                    ]
+
+                flash_models = [
+                    m for m in available_models if "flash" in m.lower()
+                ]
+                other_models = [
+                    m for m in available_models if "flash" not in m.lower()
+                ]
+                models_to_try = flash_models + other_models
+
+                if not models_to_try:
+                    models_to_try = [
+                        "gemini-2.5-flash",
+                        "gemini-2.0-flash",
+                        "gemini-1.5-flash",
+                    ]
+
+                response = None
+                last_error = None
+
+                for model_name in models_to_try:
+                    for attempt in range(2):
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=[
+                                    types.Part.from_bytes(
+                                        data=file_bytes, mime_type=mime_type
+                                    ),
+                                    prompt,
+                                ],
+                            )
+                            if response and response.text:
+                                break
+                        except Exception as e:
+                            last_error = e
+                            err_msg = str(e)
+                            if (
+                                "503" in err_msg
+                                or "UNAVAILABLE" in err_msg
+                                or "429" in err_msg
+                            ):
+                                time.sleep(2)
+                                continue
+                            else:
+                                break
+                    if response and response.text:
+                        break
+
+                if not response or not response.text:
+                    raise last_error
+
+                clean_json = (
+                    response.text.replace("```json", "")
+                    .replace("```", "")
+                    .strip()
+                )
+                raw_data = json.loads(clean_json)
+                doc_type = raw_data.get("document_type", "UPI_SEMICONDUCTOR")
+
+                # =========================================================
+                # 呼叫 parsers 模組處理邏輯
+                # =========================================================
+                if doc_type == "BENQ_COMPARE":
+                    st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
+                    df_compare, excel_bytes = process_benq_compare(raw_data)
+
+                    st.subheader("📋 報單比對 17 欄位預覽")
+                    st.dataframe(df_compare, use_container_width=True)
+
+                    st.download_button(
+                        label="📥 下載報單比對 Excel (.xlsx)",
+                        data=excel_bytes,
+                        file_name="報單比對.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+                else:
+                    st.success("✅ 自動辨識為 **力智/半導體** 格式！")
+                    df_inv, df_pack, excel_bytes = process_upi_semiconductor(
+                        raw_data
+                    )
+
+                    st.subheader("🧾 Invoice（發票）解析結果預覽")
+                    st.dataframe(df_inv, use_container_width=True)
+
+                    st.subheader("📦 Packing List（裝箱單）解析結果預覽")
+                    st.dataframe(df_pack, use_container_width=True)
+
+                    st.download_button(
+                        label="📥 下載多頁籤 Excel 檔案 (.xlsx)",
+                        data=excel_bytes,
+                        file_name=f"Parsed_{uploaded_file.name}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+                st.success("解析成功！已依據文件格式產出對應 Excel 檔案。")
+
+            except Exception as e:
+                st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
