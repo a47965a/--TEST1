@@ -5,7 +5,7 @@ from openpyxl.styles import Alignment
 
 
 def process_benq_compare(raw_data, filename_prefix="CB9PF"):
-    """專門處理 BENQ 17 欄位報單比對邏輯 (含頁尾雜訊清洗與跨頁對齊)"""
+    """專門處理 BENQ 17 欄位報單比對邏輯 (含極致品名清洗與跨頁對齊)"""
     compare_data = raw_data.get("compare_data", [])
     df = pd.DataFrame(compare_data)
 
@@ -49,7 +49,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["*出口報單號碼"] = df["*出口報單號碼"].apply(fix_decl_no)
 
-    # 2. ⚡ 強力清洗【品名】：徹底濾除欄位(45)/(46)頁尾雜訊 (BMS, CNSHA, P/NO 等)
+    # 2. ⚡ 極致品名清洗：刪除 NO BRAND, S/N, BOM No, Polarizer Film 及頁尾雜訊
     if "*Item Description" in df.columns:
 
         def clean_description(val):
@@ -57,7 +57,28 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
                 return ""
             v_str = str(val).strip()
 
-            # 定義要過濾的頁尾標號與雜訊字串
+            # (A) 剔除開頭的總品名與廠牌
+            v_str = re.sub(
+                r"^(Polarizer\s+Film|NO\s+BRAND|BENQ|FUJIFILM|AUO)\s*",
+                "",
+                v_str,
+                flags=re.IGNORECASE,
+            )
+
+            # (B) 剔除 S/N:料號 標籤
+            v_str = re.sub(
+                r"S/N\s*:\s*[A-Za-z0-9\.\_\-]+\s*",
+                "",
+                v_str,
+                flags=re.IGNORECASE,
+            )
+
+            # (C) 剔除品名中的 BOM No. Cxxxxxxx
+            v_str = re.sub(
+                r"BOM\s+No\.?\s*[A-Za-z0-9]+\s*", "", v_str, flags=re.IGNORECASE
+            )
+
+            # (D) 剔除頁尾雜訊欄位
             noise_patterns = [
                 r"\bBMS\b",
                 r"\bCNSHA\b",
@@ -67,30 +88,27 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
                 r"ITEM NO\..*",
                 r"INVOICE NO:.*",
                 r"出口字第.*",
-                r"總件數.*",
-                r"包裝說明.*",
             ]
             for pattern in noise_patterns:
                 v_str = re.sub(pattern, "", v_str, flags=re.IGNORECASE)
 
-            # 移除單獨因頁尾誤抓的 MADE IN TAIWAN/JAPAN (如果前面被清光只剩產地)
-            lines = [line.strip() for line in v_str.split("\n") if line.strip()]
-            clean_lines = []
-            for line in lines:
-                # 剔除頁尾特有的標記行
-                if re.match(r"^(BMS|CNSHA|P/NO|INVOICE NO)", line, re.I):
-                    continue
-                clean_lines.append(line)
+            # 清理多餘空行與前後空格
+            lines = [
+                line.strip()
+                for line in v_str.split("\n")
+                if line.strip()
+                and not re.match(r"^(NO BRAND|BENQ|Polarizer)", line, re.I)
+            ]
+            result = "\n".join(clean_lines if (clean_lines := lines) else [v_str])
 
-            result = "\n".join(clean_lines)
-
-            # 保留正規的 MADE IN 換行格式
+            # (E) 保留 MADE IN 並換行
             result = re.sub(
                 r"(?<!\n)(MADE\s+IN\s+[A-Za-z]+)",
                 r"\n\1",
                 result,
                 flags=re.IGNORECASE,
             )
+
             return result.strip()
 
         df["*Item Description"] = df["*Item Description"].apply(
@@ -121,7 +139,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["*統計方式"] = df["*統計方式"].apply(fix_stat_mode)
 
-    # 5. 強制修正【報單類別】只保留前兩碼 (例如 "B9保稅廠產品出口" -> "B9")
+    # 5. 強制修正【報單類別】只保留前兩碼 (例如 "B9" )
     if "報單類別" in df.columns:
 
         def fix_doc_type(val):
@@ -133,7 +151,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["報單類別"] = df["報單類別"].apply(fix_doc_type)
 
-    # 6. 強制修正【報關日期】(若出現 115/10/08 自動轉 2026/10/08)
+    # 6. 強制修正【報關日期】(轉西元 YYYY/MM/DD)
     if "*報關日期" in df.columns:
 
         def fix_date(d):
