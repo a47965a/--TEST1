@@ -5,7 +5,7 @@ from openpyxl.styles import Alignment
 
 
 def process_benq_compare(raw_data, filename_prefix="CB9PF"):
-    """專門處理 BENQ 17 欄位報單比對邏輯 (完全依循原始文件順序與格式規範)"""
+    """專門處理 BENQ 17 欄位報單比對邏輯 (含頁尾雜訊清洗與跨頁對齊)"""
     compare_data = raw_data.get("compare_data", [])
     df = pd.DataFrame(compare_data)
 
@@ -32,7 +32,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
         if col not in df.columns:
             df[col] = None
 
-    # 1. 強制清理【出口報單號碼】：移除所有斜線，並將 CW 與後續數字之間強制補 2 個空格
+    # 1. 強制清理【出口報單號碼】：移除所有斜線，CW 與數字間保持 2 個空格
     if "*出口報單號碼" in df.columns:
 
         def fix_decl_no(val):
@@ -49,21 +49,52 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["*出口報單號碼"] = df["*出口報單號碼"].apply(fix_decl_no)
 
-    # 2. 強制【MADE IN】換行處理
+    # 2. ⚡ 強力清洗【品名】：徹底濾除欄位(45)/(46)頁尾雜訊 (BMS, CNSHA, P/NO 等)
     if "*Item Description" in df.columns:
 
-        def fix_description(val):
+        def clean_description(val):
             if pd.isna(val) or not val:
                 return ""
             v_str = str(val).strip()
-            # 若含有 MADE IN 但尚未換行，自動補上 \n
-            v_str = re.sub(
-                r"(?<!\n)(MADE\s+IN\s+[A-Za-z]+)", r"\n\1", v_str, flags=re.IGNORECASE
+
+            # 定義要過濾的頁尾標號與雜訊字串
+            noise_patterns = [
+                r"\bBMS\b",
+                r"\bCNSHA\b",
+                r"\bCNSZH\b",
+                r"\bAUS\b",
+                r"P/NO.*",
+                r"ITEM NO\..*",
+                r"INVOICE NO:.*",
+                r"出口字第.*",
+                r"總件數.*",
+                r"包裝說明.*",
+            ]
+            for pattern in noise_patterns:
+                v_str = re.sub(pattern, "", v_str, flags=re.IGNORECASE)
+
+            # 移除單獨因頁尾誤抓的 MADE IN TAIWAN/JAPAN (如果前面被清光只剩產地)
+            lines = [line.strip() for line in v_str.split("\n") if line.strip()]
+            clean_lines = []
+            for line in lines:
+                # 剔除頁尾特有的標記行
+                if re.match(r"^(BMS|CNSHA|P/NO|INVOICE NO)", line, re.I):
+                    continue
+                clean_lines.append(line)
+
+            result = "\n".join(clean_lines)
+
+            # 保留正規的 MADE IN 換行格式
+            result = re.sub(
+                r"(?<!\n)(MADE\s+IN\s+[A-Za-z]+)",
+                r"\n\1",
+                result,
+                flags=re.IGNORECASE,
             )
-            return v_str
+            return result.strip()
 
         df["*Item Description"] = df["*Item Description"].apply(
-            fix_description
+            clean_description
         )
 
     # 3. 強制修正【單位】（如 m/M 轉為 MTR，其它轉大寫）
@@ -135,7 +166,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["保稅"] = df["保稅"].apply(fix_bonded)
 
-    # 8. 完全尊重原始項次順序
+    # 8. 確保出口項次順序
     if "*出口項次" in df.columns and not df.empty:
         seq_list = list(range(1, len(df) + 1))
         df["*出口項次"] = pd.to_numeric(
@@ -144,14 +175,14 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
     df = df[compare_cols]
 
-    # 產出 Excel Buffer，並設定自動換行格式
+    # 產出 Excel Buffer 並設定自動換行
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="GoodsCompare")
         workbook = writer.book
         worksheet = writer.sheets["GoodsCompare"]
 
-        # 將品名欄位（F欄，第 6 欄）設定自動換行 (wrap_text=True)
+        # 設定品名欄位（F欄）自動換行
         for row in worksheet.iter_rows(
             min_row=2, max_row=len(df) + 1, min_col=6, max_col=6
         ):
