@@ -1,5 +1,6 @@
 import io
 import json
+import time
 from datetime import datetime
 from google import genai
 from google.genai import types
@@ -123,24 +124,46 @@ if uploaded_file and api_key:
                 - 請嚴格回傳純 JSON Object。
                 """
 
-                # ⚡ 修正模型名稱為 gemini-2.0-flash
-                response = client.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=[
-                        types.Part.from_bytes(
-                            data=file_bytes, mime_type=mime_type
-                        ),
-                        prompt,
-                    ],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.1,
-                    ),
-                )
+                # ⚡ 自動獲取該 Key 支援的模型，避免固定的模型名稱報 404
+                models_to_try = []
+                try:
+                    for m in client.models.list():
+                        m_name = m.name.replace("models/", "")
+                        if "flash" in m_name.lower():
+                            models_to_try.append(m_name)
+                except Exception:
+                    pass
+
+                # 若無法自動獲取，預設優先嘗試的模型列表
+                if not models_to_try:
+                    models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+
+                response = None
+                last_err = None
+
+                for target_model in models_to_try:
+                    try:
+                        response = client.models.generate_content(
+                            model=target_model,
+                            contents=[
+                                types.Part.from_bytes(
+                                    data=file_bytes, mime_type=mime_type
+                                ),
+                                prompt,
+                            ],
+                            config=types.GenerateContentConfig(
+                                response_mime_type="application/json",
+                                temperature=0.1,
+                            ),
+                        )
+                        if response and response.text:
+                            break
+                    except Exception as err:
+                        last_err = err
+                        continue
 
                 if not response or not response.text:
-                    st.error("API 未成功回傳內容，請稍後再試。")
-                    st.stop()
+                    raise last_err
 
                 clean_json = (
                     response.text.replace("```json", "")
