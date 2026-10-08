@@ -42,28 +42,35 @@ if uploaded_file and api_key:
                 請閱讀這份文件，判斷文件屬於哪種格式 (document_type)：
 
                 【格式 A：BENQ_COMPARE】
-                若為 BENQ (明基材料) 的 Commercial Invoice (含有 GOODS NO, 偏光片規格如 M315/M240, 或 (91.xxx) 格式料號)：
-                請回傳 JSON Object，格式如下：
+                若為 BENQ (明基材料) 的 Commercial Invoice 或海關出口報單 (含有 CW 報單號碼、GOODS NO、或 C5790 監管編號)：
+                
+                ⚠️ 跨頁拼接特別注意事項（極重要）：
+                若報單有多頁（如第1頁與第2頁），當某個項次跨越頁尾與頁首時（例如項次 3）：
+                - 品名規格會被裁切成兩段，請務必將第1頁頁尾與第2頁頁首的文字【完整拼接在一起】！
+                  例如：第1頁的 "T/SS/21/479.32X247.36/G-" + 第2頁的 "FILM_HC_HWP+QWP+LCF/TK" 必須結合成 "T/SS/21/479.32X247.36/G-FILM_HC_HWP+QWP+LCF/TK"
+                - 第2頁頂部的 "BOM No. C0115030149" 與 "YB" 是屬於第1頁項次 3 的資料，請務必歸納在【項次 3】，絕對不能放到項次 4 或 5！
+
+                請回傳 JSON Object 格式如下：
                 {{
                   "document_type": "BENQ_COMPARE",
                   "compare_data": [
                     {{
-                      "*貨物編號": "頁面頂部 GOODS NO (如 CB9PF260768)",
-                      "*出口項次": 1,
-                      "*出口報單號碼": null,
-                      "*報關日期": "{upload_date_str}",
-                      "Item No": "UNIT PRICE 正下方括號內文字 (如 91.4A311.020.161)",
-                      "*Item Description": "僅保留中間規格描述 (如 B/MN/AUO/31.5/M315QAN01.0/Z-TAC_PET/TLN/161)，嚴格刪除 'Polarizer Film' 及 'C/No:' 以下的所有文字",
-                      "*Unit": "單位一律轉大寫 (如 PCS, MTR)",
+                      "*貨物編號": "出口字號 (如 CB9PF260772)，不要誤帶報單號碼",
+                      "*出口項次": 項次數字 (1, 2, 3, 4, 5...請按報單原始項次，共 5 項),
+                      "*出口報單號碼": "報單號碼 (請提取 CW 150A7 14001，勿包含斜線 // )",
+                      "*報關日期": "報關日期 YYYY/MM/DD (民國年請轉西元，如 115/10/08 轉為 2026/10/08)",
+                      "Item No": "S/N: 後方的料號 (如 5G.19B10.040, XS.0203A.005)",
+                      "*Item Description": "品名規格 (請剔除 Polarizer Film, S/N, BOM No 等字樣，但若有跨頁請完整拼接，保留 MADE IN TAIWAN / JAPAN)",
+                      "*Unit": "單位轉大寫 (如 MTR, PCE, PCS)",
                       "*Quantity": 數量數字,
-                      "*統計方式": null,
-                      "*匯率": null,
+                      "*統計方式": "統計方式代碼 (請務必回傳字串如 '02', '53')",
+                      "*匯率": 匯率數字 (如 31.73),
                       "核銷進口報單號碼": null,
                       "進口項次": null,
-                      "BOM No": "BOM No. 文字 (如 C0115029913)",
-                      "保稅": null,
+                      "BOM No": "BOM No. (如項次 3 的 BOM No 為 C0115030149，項次 4~5 為 null)",
+                      "保稅": "稅則號別正下方的【保稅貨物註記】(請精準填入 'YB' 或 'NB')",
                       "監管編號": "C5790",
-                      "報單類別": null,
+                      "報單類別": "表頭欄位(2)報單類別代碼 (例如 'B9'，不要包含中文說明)",
                       "單價": 單價數字
                     }}
                   ]
