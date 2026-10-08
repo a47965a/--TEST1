@@ -17,6 +17,7 @@ st.set_page_config(
 
 st.title("📄 Shipping Docs 自動解析工具")
 st.caption("支援供應商: 力智、明基(報單轉換)")
+st.info("💡 提示：若 AI 解析超過 3 分鐘仍未完成，請重新整理網頁並重新上傳檔案進行嘗試。")
 
 # 讀取 Secrets 中的 API Key，若無則從 Sidebar 輸入
 api_key = st.secrets.get("GEMINI_API_KEY", "")
