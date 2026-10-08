@@ -194,19 +194,19 @@ if uploaded_file and api_key:
                 # =========================================================
                 # 呼叫 parsers 模組處理邏輯
                 # =========================================================
-                if doc_type == "BENQ_COMPARE":
-                    st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
-                    df_compare, excel_bytes = process_benq_compare(raw_data)
+if doc_type == "BENQ_COMPARE":
+    st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
+    df_compare, excel_bytes = process_benq_compare(raw_data)
 
-                    st.subheader("📋 報單比對 17 欄位預覽")
-                    st.dataframe(df_compare, use_container_width=True)
+    st.subheader("📋 報單比對 17 欄位預覽")
+    st.dataframe(df_compare, use_container_width=True)
 
-                    st.download_button(
-                        label="📥 下載報單比對 Excel (.xlsx)",
-                        data=excel_bytes,
-                        file_name=f"GoodsCompare_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
+    st.download_button(
+        label="📥 下載報單比對 Excel (.xlsx)",
+        data=excel_bytes,
+        file_name="報單比對.xlsx",  # 👈 這裡已改為「報單比對.xlsx」
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
                 else:
                     st.success("✅ 自動辨識為 **力智/半導體** 格式！")
