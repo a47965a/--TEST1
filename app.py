@@ -75,7 +75,7 @@ if uploaded_file and api_key:
                     }}
                   ]
                 }}
-                """
+
 
                 【格式 B：UPI_SEMICONDUCTOR】
                 若為力智 (uPI) 或一般半導體/IC 廠商的 Invoice / Packing List：
