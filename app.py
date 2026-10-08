@@ -52,7 +52,7 @@ if uploaded_file and api_key:
                 mime_type = uploaded_file.type
                 upload_date_str = datetime.now().strftime("%Y/%m/%d")
 
-                # 整合 Prompt：自動判斷文件類別並套用對應擷取規則
+                # 整合 Prompt
                 prompt = f"""
                 你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
                 請閱讀這份文件，首先判斷文件屬於哪種格式 (document_type)：
@@ -121,73 +121,27 @@ if uploaded_file and api_key:
 
                 注意事項：
                 - 數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。
-                - 請嚴格回傳純 JSON Object，不要包含 Markdown 標記 (如 ```json )。
+                - 請嚴格回傳純 JSON Object。
                 """
 
-                # 動態獲取該 API Key 支援的模型
-                available_models = []
-                try:
-                    for m in client.models.list():
-                        if (
-                            hasattr(m, "supported_generation_methods")
-                            and "generateContent"
-                            in m.supported_generation_methods
-                        ):
-                            name = m.name.replace("models/", "")
-                            available_models.append(name)
-                        elif not hasattr(m, "supported_generation_methods"):
-                            name = m.name.replace("models/", "")
-                            available_models.append(name)
-                except Exception:
-                    available_models = [
-                        "gemini-2.5-flash",
-                        "gemini-2.0-flash",
-                    ]
-
-                flash_models = [
-                    m for m in available_models if "flash" in m.lower()
-                ]
-                other_models = [
-                    m for m in available_models if "flash" not in m.lower()
-                ]
-                models_to_try = flash_models + other_models
-                if not models_to_try:
-                    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
-
-                response = None
-                last_error = None
-
-                for model_name in models_to_try:
-                    for attempt in range(2):
-                        try:
-                            response = client.models.generate_content(
-                                model=model_name,
-                                contents=[
-                                    types.Part.from_bytes(
-                                        data=file_bytes, mime_type=mime_type
-                                    ),
-                                    prompt,
-                                ],
-                            )
-                            if response and response.text:
-                                break
-                        except Exception as e:
-                            last_error = e
-                            err_msg = str(e)
-                            if (
-                                "503" in err_msg
-                                or "UNAVAILABLE" in err_msg
-                                or "429" in err_msg
-                            ):
-                                time.sleep(2)
-                                continue
-                            else:
-                                break
-                    if response and response.text:
-                        break
+                # ⚡⚡⚡ 核心加速呼叫：指定 Flash + 開啟原生 JSON 模式 ⚡⚡⚡
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[
+                        types.Part.from_bytes(
+                            data=file_bytes, mime_type=mime_type
+                        ),
+                        prompt,
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.1,
+                    ),
+                )
 
                 if not response or not response.text:
-                    raise last_error
+                    st.error("API 未成功回傳內容，請稍後再試。")
+                    st.stop()
 
                 clean_json = (
                     response.text.replace("```json", "")
@@ -234,9 +188,7 @@ if uploaded_file and api_key:
                     st.dataframe(df_compare, use_container_width=True)
 
                     output = io.BytesIO()
-                    with pd.ExcelWriter(
-                        output, engine="openpyxl"
-                    ) as writer:
+                    with pd.ExcelWriter(output, engine="openpyxl") as writer:
                         df_compare.to_excel(
                             writer, index=False, sheet_name="GoodsCompare"
                         )
@@ -293,42 +245,3 @@ if uploaded_file and api_key:
                     # 數值欄位轉純數字
                     inv_num_cols = ["數量", "單價", "總價", "發票總金額"]
                     for col in inv_num_cols:
-                        df_inv[col] = df_inv[col].apply(clean_numeric)
-
-                    pack_num_cols = ["數量", "總 GW (KGS)", "總 NW (KGS)"]
-                    for col in pack_num_cols:
-                        df_pack[col] = df_pack[col].apply(clean_numeric)
-
-                    st.subheader("🧾 Invoice（發票）解析結果預覽")
-                    st.dataframe(df_inv, use_container_width=True)
-
-                    st.subheader("📦 Packing List（裝箱單）解析結果預覽")
-                    st.dataframe(df_pack, use_container_width=True)
-
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(
-                        output, engine="openpyxl"
-                    ) as writer:
-                        df_inv.to_excel(
-                            writer, index=False, sheet_name="Invoice"
-                        )
-                        df_pack.to_excel(
-                            writer, index=False, sheet_name="Packing_List"
-                        )
-                    excel_data = output.getvalue()
-
-                    st.download_button(
-                        label="📥 下載多頁籤 Excel 檔案 (.xlsx)",
-                        data=excel_data,
-                        file_name=f"Parsed_{uploaded_file.name}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-
-                st.success(
-                    "解析成功！已依據文件格式產出對應 Excel 檔案。"
-                )
-
-            except Exception as e:
-                st.error(
-                    f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}"
-                )
