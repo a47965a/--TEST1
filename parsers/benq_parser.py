@@ -56,7 +56,7 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["_has_bom"] = df["BOM No"].apply(is_valid_bom)
 
-        # kind="stable" 會百分之百保留原 Invoice 的相對順序
+        # kind="stable" 會百分之百保留原 Invoice / 報單 的相對順序
         df = df.sort_values(by=["_has_bom"], kind="stable").reset_index(
             drop=True
         )
