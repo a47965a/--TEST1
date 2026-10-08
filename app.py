@@ -81,7 +81,6 @@ if uploaded_file and api_key:
                   ]
                 }}
 
-
                 【格式 B：UPI_SEMICONDUCTOR】
                 若為力智 (uPI) 或一般半導體/IC 廠商的 Invoice / Packing List：
                 請將 INVOICE 與 PACKING LIST 明細資料分開擷取，回傳 JSON Object 格式如下：
