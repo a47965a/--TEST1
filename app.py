@@ -11,14 +11,13 @@ from parsers.upi_parser import process_upi_semiconductor
 
 # 1. 頁面基本設定
 st.set_page_config(
-    page_title="多客戶 Shipping Docs AI 自動解析工具",
+    page_title="Shipping Docs 自動解析工具",
     layout="wide",
 )
 
-st.title("📄 多客戶 Shipping Docs AI 自動解析工具")
-st.caption(
-    "支援力智 (uPI) 雙頁籤 Invoice/Packing 處理，以及 BENQ 等標準 17 欄位報單比對自動生成。"
-)
+st.title("📄 Shipping Docs 自動解析工具")
+st.caption("支援供應商: 力智、明基(報單轉換)")
+
 
 # 讀取 Secrets 中的 API Key，若無則從 Sidebar 輸入
 api_key = st.secrets.get("GEMINI_API_KEY", "")
