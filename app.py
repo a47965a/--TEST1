@@ -36,7 +36,7 @@ if uploaded_file and api_key:
                 mime_type = uploaded_file.type
                 upload_date_str = datetime.now().strftime("%Y/%m/%d")
 
-               prompt = f"""
+                prompt = f"""
                 你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
                 請閱讀這份文件，判斷文件屬於哪種格式 (document_type)：
 
