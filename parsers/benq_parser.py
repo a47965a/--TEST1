@@ -103,11 +103,11 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
     # -------------------------------------------------------------
     # ⚡ 完全尊重報單 / Invoice 的原始項次與順序，不實施任何重新排序
     # -------------------------------------------------------------
-    if "*出口項次" in df.columns:
-        # 確保出口項次呈現 1, 2, 3, 4, 5...
+    if "*出口項次" in df.columns and not df.empty:
+        seq_list = list(range(1, len(df) + 1))
         df["*出口項次"] = pd.to_numeric(
             df["*出口項次"], errors="coerce"
-        ).fillna(range(1, len(df) + 1))
+        ).fillna(pd.Series(seq_list, index=df.index))
 
     df = df[compare_cols]
 
