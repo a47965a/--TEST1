@@ -123,9 +123,9 @@ if uploaded_file and api_key:
                 - 請嚴格回傳純 JSON Object。
                 """
 
-                # ⚡ 核心極速呼叫：指定 Flash + 開啟原生 JSON 模式
+                # ⚡ 修正模型名稱為 gemini-2.0-flash
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-2.0-flash",
                     contents=[
                         types.Part.from_bytes(
                             data=file_bytes, mime_type=mime_type
@@ -241,7 +241,7 @@ if uploaded_file and api_key:
                             df_pack[col] = None
                     df_pack = df_pack[pack_cols]
 
-                    # 數值欄位轉純數字 (修正縮排)
+                    # 數值欄位轉純數字
                     inv_num_cols = ["數量", "單價", "總價", "發票總金額"]
                     for col in inv_num_cols:
                         df_inv[col] = df_inv[col].apply(clean_numeric)
