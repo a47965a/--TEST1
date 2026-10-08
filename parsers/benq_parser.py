@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def process_benq_compare(raw_data, filename_prefix="CB9PF"):
-    """專門處理 BENQ 17 欄位報單比對邏輯"""
+    """專門處理 BENQ 17 欄位報單比對邏輯 (完全依循原始文件順序)"""
     compare_data = raw_data.get("compare_data", [])
     df = pd.DataFrame(compare_data)
 
@@ -62,7 +62,6 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
             if pd.isna(val) or not val:
                 return ""
             val_str = str(val).strip()
-            # 用正則擷取最前方的英數代碼（如 B9, B2, G5）
             match = re.match(r"^([A-Z0-9]{2})", val_str, re.IGNORECASE)
             return match.group(1).upper() if match else val_str[:2].upper()
 
@@ -86,31 +85,29 @@ def process_benq_compare(raw_data, filename_prefix="CB9PF"):
 
         df["*報關日期"] = df["*報關日期"].apply(fix_date)
 
+    # 5. 強制整理【保稅】欄位
+    if "保稅" in df.columns:
+
+        def fix_bonded(val):
+            if pd.isna(val) or not val:
+                return ""
+            v_str = str(val).strip().upper()
+            if "YB" in v_str:
+                return "YB"
+            if "NB" in v_str:
+                return "NB"
+            return v_str
+
+        df["保稅"] = df["保稅"].apply(fix_bonded)
+
     # -------------------------------------------------------------
-    # ⚡ 依 Invoice/報單 原始順序，僅將有 BOM No 項次優先往前提
+    # ⚡ 完全尊重報單 / Invoice 的原始項次與順序，不實施任何重新排序
     # -------------------------------------------------------------
-    if "BOM No" in df.columns:
-
-        def is_valid_bom(val):
-            if pd.isna(val) or val is None:
-                return 1  # 無 BOM 排後面
-            val_str = str(val).strip().upper()
-            if val_str in ["", "NONE", "NULL", "NAN"]:
-                return 1  # 無 BOM 排後面
-            return 0  # 有 BOM 排前面
-
-        df["_has_bom"] = df["BOM No"].apply(is_valid_bom)
-
-        # kind="stable" 會百分之百保留原相對順序
-        df = df.sort_values(by=["_has_bom"], kind="stable").reset_index(
-            drop=True
-        )
-
-        # 重新編號「*出口項次」（1, 2, 3, ...）
-        df["*出口項次"] = range(1, len(df) + 1)
-
-        # 刪除臨時欄位
-        df = df.drop(columns=["_has_bom"])
+    if "*出口項次" in df.columns:
+        # 確保出口項次呈現 1, 2, 3, 4, 5...
+        df["*出口項次"] = pd.to_numeric(
+            df["*出口項次"], errors="coerce"
+        ).fillna(range(1, len(df) + 1))
 
     df = df[compare_cols]
 
