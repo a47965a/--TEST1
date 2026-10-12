@@ -292,4 +292,36 @@ if uploaded_file and api_key:
 
                 else:
                     st.success("✅ 自動辨識為 **力智/半導體** 格式！")
-                    df_inv
+                    df_inv, df_pack, excel_bytes = process_upi_semiconductor(
+                        raw_data
+                    )
+
+                    st.subheader("🧾 Invoice（發票）解析結果預覽")
+                    st.dataframe(df_inv, use_container_width=True)
+
+                    st.subheader("📦 Packing List（裝箱單）解析結果預覽")
+                    st.dataframe(df_pack, use_container_width=True)
+
+                    st.download_button(
+                        label="📥 下載多頁籤 Excel 檔案 (.xlsx)",
+                        data=excel_bytes,
+                        file_name=f"Parsed_{uploaded_file.name}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                    doc_type_label = "力智半導體"
+
+                # =========================================================
+                # 📝 記錄上傳歷史並寫入硬碟 (重新整理不會消失)
+                # =========================================================
+                new_record = {
+                    "time": upload_time_str,
+                    "filename": uploaded_file.name,
+                    "doc_type": doc_type_label,
+                }
+                st.session_state.global_history.insert(0, new_record)
+                save_history(st.session_state.global_history)
+
+                st.success("解析成功！已依據文件格式產出對應 Excel 檔案。")
+
+            except Exception as e:
+                st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
