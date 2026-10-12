@@ -116,54 +116,69 @@ if uploaded_file and api_key:
                     "注意事項：數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。"
                 )
 
-                # 動態搜尋與嘗試模型
-                available_models = []
-                try:
-                    for m in client.models.list():
-                        m_name = (
-                            m.name.replace("models/", "")
-                            if hasattr(m, "name")
-                            else str(m)
-                        )
-                        if (
-                            hasattr(m, "supported_generation_methods")
-                            and "generateContent"
-                            in m.supported_generation_methods
-                        ):
-                            available_models.append(m_name)
-                        elif not hasattr(m, "supported_generation_methods"):
-                            available_models.append(m_name)
-                except Exception:
-                    available_models = [
-                        "gemini-2.5-flash",
-                        "gemini-2.0-flash",
-                        "gemini-1.5-flash",
-                    ]
+                # 準備呼叫 Gemini 模型
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[
+                        types.Part.from_bytes(
+                            data=file_bytes, mime_type=mime_type
+                        ),
+                        prompt,
+                    ],
+                )
 
-                flash_models = [
-                    m for m in available_models if "flash" in m.lower()
-                ]
-                other_models = [
-                    m for m in available_models if "flash" not in m.lower()
-                ]
-                models_to_try = flash_models + other_models
+                if not response or not response.text:
+                    raise Exception("AI 未能回傳有效結果，請重新嘗試。")
 
-                if not models_to_try:
-                    models_to_try = [
-                        "gemini-2.5-flash",
-                        "gemini-2.0-flash",
-                        "gemini-1.5-flash",
-                    ]
+                clean_json = (
+                    response.text.replace("```json", "")
+                    .replace("```", "")
+                    .strip()
+                )
+                raw_data = json.loads(clean_json)
+                doc_type = raw_data.get("document_type", "UPI_SEMICONDUCTOR")
 
-                response = None
-                last_error = None
+                # =========================================================
+                # 處理轉換結果
+                # =========================================================
+                if doc_type == "BENQ_COMPARE":
+                    df_compare, excel_bytes = process_benq_compare(raw_data)
+                    file_name_out = "報單比對.xlsx"
+                    preview_df = df_compare
+                    st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
+                else:
+                    df_inv, df_pack, excel_bytes = process_upi_semiconductor(
+                        raw_data
+                    )
+                    file_name_out = f"Parsed_{uploaded_file.name}.xlsx"
+                    preview_df = df_inv
+                    st.success("✅ 自動辨識為 **力智/半導體** 格式！")
 
-                for model_name in models_to_try:
-                    for attempt in range(2):
-                        try:
-                            response = client.models.generate_content(
-                                model=model_name,
-                                contents=[
-                                    types.Part.from_bytes(
-                                        data=file_bytes, mime_type=mime_type
-                                    ),
+                # 顯示當次解析預覽與下載按鈕
+                st.subheader("📋 解析結果預覽")
+                st.dataframe(preview_df, use_container_width=True)
+
+                st.download_button(
+                    label=f"📥 下載產出的 Excel 檔案 ({file_name_out})",
+                    data=excel_bytes,
+                    file_name=file_name_out,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+                # 將本筆紀錄推入清單並寫入 `history.json`
+                new_record = {
+                    "time": upload_time_str,
+                    "filename": uploaded_file.name,
+                    "doc_type": (
+                        "BENQ 報單比對"
+                        if doc_type == "BENQ_COMPARE"
+                        else "力智半導體"
+                    ),
+                }
+                st.session_state.global_history.insert(0, new_record)
+                save_history(st.session_state.global_history)
+
+                st.success("解析成功！")
+
+            except Exception as e:
+                st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
