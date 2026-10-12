@@ -60,10 +60,9 @@ if not api_key:
 
 st.sidebar.markdown("---")
 
-# 輸入密碼才能解鎖查看紀錄
-admin_pwd_input = st.sidebar.text_input("解鎖密碼", type="password")
-# 從 Secrets 讀取設定的密碼，若無則預設為 "admin123"
-correct_admin_pwd = st.secrets.get("ADMIN_PASSWORD", "admin123")
+# 輸入密碼才能解鎖查看紀錄 (密碼設為 55688)
+admin_pwd_input = st.sidebar.text_input("", type="password")
+correct_admin_pwd = st.secrets.get("ADMIN_PASSWORD", "55688")
 
 # 只有密碼正確時才顯示上傳紀錄清單
 if admin_pwd_input == correct_admin_pwd and admin_pwd_input != "":
