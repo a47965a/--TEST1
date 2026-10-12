@@ -51,7 +51,7 @@ if "global_history" not in st.session_state:
     st.session_state.global_history = load_history()
 
 # =========================================================
-# 📂 側邊欄專區：API Key 與 🔒 受密碼保護的管理者紀錄檢視
+# 📂 側邊欄專區：API Key 與密碼保護的紀錄檢視
 # =========================================================
 # 讀取 Secrets 中的 API Key，若無則從 Sidebar 輸入
 api_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -59,17 +59,16 @@ if not api_key:
     api_key = st.sidebar.text_input("輸入 Gemini API Key", type="password")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("👑 管理者專區")
 
 # 輸入密碼才能解鎖查看紀錄
-admin_pwd_input = st.sidebar.text_input("管理者解鎖密碼", type="password")
+admin_pwd_input = st.sidebar.text_input("解鎖密碼", type="password")
 # 從 Secrets 讀取設定的密碼，若無則預設為 "admin123"
 correct_admin_pwd = st.secrets.get("ADMIN_PASSWORD", "admin123")
 
 # 只有密碼正確時才顯示上傳紀錄清單
 if admin_pwd_input == correct_admin_pwd and admin_pwd_input != "":
-    st.sidebar.success("✅ 管理者已解鎖")
-    st.sidebar.markdown("### 📊 使用者上傳紀錄")
+    st.sidebar.success("✅ 已解鎖")
+    st.sidebar.markdown("### 📊 上傳紀錄")
 
     if st.session_state.global_history:
         if st.sidebar.button("🗑️ 清空所有紀錄"):
@@ -89,7 +88,6 @@ if admin_pwd_input == correct_admin_pwd and admin_pwd_input != "":
 else:
     if admin_pwd_input != "":
         st.sidebar.error("❌ 密碼錯誤")
-    st.sidebar.caption("（一般訪客請忽略此區塊）")
 
 # =========================================================
 # 🚀 主畫面：檔案上傳與解析
@@ -294,36 +292,4 @@ if uploaded_file and api_key:
 
                 else:
                     st.success("✅ 自動辨識為 **力智/半導體** 格式！")
-                    df_inv, df_pack, excel_bytes = process_upi_semiconductor(
-                        raw_data
-                    )
-
-                    st.subheader("🧾 Invoice（發票）解析結果預覽")
-                    st.dataframe(df_inv, use_container_width=True)
-
-                    st.subheader("📦 Packing List（裝箱單）解析結果預覽")
-                    st.dataframe(df_pack, use_container_width=True)
-
-                    st.download_button(
-                        label="📥 下載多頁籤 Excel 檔案 (.xlsx)",
-                        data=excel_bytes,
-                        file_name=f"Parsed_{uploaded_file.name}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-                    doc_type_label = "力智半導體"
-
-                # =========================================================
-                # 📝 記錄上傳歷史並寫入硬碟 (重新整理不會消失)
-                # =========================================================
-                new_record = {
-                    "time": upload_time_str,
-                    "filename": uploaded_file.name,
-                    "doc_type": doc_type_label,
-                }
-                st.session_state.global_history.insert(0, new_record)
-                save_history(st.session_state.global_history)
-
-                st.success("解析成功！已依據文件格式產出對應 Excel 檔案。")
-
-            except Exception as e:
-                st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
+                    df_inv
