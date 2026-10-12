@@ -167,19 +167,3 @@ if uploaded_file and api_key:
                                     types.Part.from_bytes(
                                         data=file_bytes, mime_type=mime_type
                                     ),
-                                    prompt,
-                                ],
-                            )
-                            if response and response.text:
-                                break
-                        except Exception as e:
-                            last_error = e
-                            err_msg = str(e)
-                            if (
-                                "503" in err_msg
-                                or "UNAVAILABLE" in err_msg
-                                or "429" in err_msg
-                            ):
-                                time.sleep(2)
-                                continue
-                            else:
