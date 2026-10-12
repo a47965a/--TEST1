@@ -24,7 +24,7 @@ if "global_history" not in st.session_state:
     st.session_state.global_history = []
 
 # =========================================================
-# 📂 側邊欄專區（一般使用者只看到 API Key，管理者可展開歷史紀錄）
+# 📂 側邊欄專區：API Key 與 🔒 受密碼保護的管理者紀錄檢視
 # =========================================================
 # 讀取 Secrets 中的 API Key，若無則從 Sidebar 輸入
 api_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -33,28 +33,32 @@ if not api_key:
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("👑 管理者專區")
-show_admin_history = st.sidebar.checkbox("顯示所有使用者的上傳歷史紀錄")
 
-if show_admin_history:
-    st.sidebar.markdown("### 📊 歷史紀錄清單")
+# 輸入密碼才能解鎖查看紀錄
+admin_pwd_input = st.sidebar.text_input("管理者解鎖密碼", type="password")
+# 從 Secrets 讀取設定的密碼，若無則預設為 "admin123"
+correct_admin_pwd = st.secrets.get("ADMIN_PASSWORD", "admin123")
+
+# 只有密碼正確時才顯示上傳紀錄清單
+if admin_pwd_input == correct_admin_pwd and admin_pwd_input != "":
+    st.sidebar.success("✅ 管理者已解鎖")
+    st.sidebar.markdown("### 📊 使用者上傳紀錄")
+
     if st.session_state.global_history:
-        if st.sidebar.button("🗑️ 清空所有歷史"):
+        if st.sidebar.button("🗑️ 清空所有紀錄"):
             st.session_state.global_history = []
             st.rerun()
 
-        for idx, item in enumerate(st.session_state.global_history):
-            st.sidebar.markdown(f"**[{item['time']}]** `{item['filename']}`")
-            st.sidebar.caption(f"類型: {item['doc_type']}")
-            st.sidebar.download_button(
-                label=f"📥 下載 Excel",
-                data=item["excel_bytes"],
-                file_name=item["file_name_out"],
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"sidebar_download_{idx}",
-            )
+        st.sidebar.markdown("---")
+        for item in st.session_state.global_history:
+            st.sidebar.text(f"🕒 {item['time']}\n📁 {item['filename']}\n🏷️ {item['doc_type']}")
             st.sidebar.markdown("---")
     else:
         st.sidebar.info("目前尚無任何上傳解析紀錄。")
+else:
+    if admin_pwd_input != "":
+        st.sidebar.error("❌ 密碼錯誤")
+    st.sidebar.caption("（一般訪客請忽略此區塊）")
 
 # =========================================================
 # 🚀 主畫面：檔案上傳與解析
@@ -148,7 +152,7 @@ if uploaded_file and api_key:
                 }}
 
                 注意事項：
-                - 數量, 單價, 總價等數值欄位請回傳純數字 (不要加千分位逗號)。
+                - 數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。
                 - 請嚴格回傳純 JSON Object，不要包含 Markdown 標記 (如 ```json )。
                 """
 
@@ -250,7 +254,7 @@ if uploaded_file and api_key:
                     preview_df = df_inv
                     st.success("✅ 自動辨識為 **力智/半導體** 格式！")
 
-                # 顯示當次解析預覽與下載按鈕
+                # 顯示當次解析預覽與下載按鈕（一般使用者維持正常下載自己的結果）
                 st.subheader("📋 解析結果預覽")
                 st.dataframe(preview_df, use_container_width=True)
 
@@ -261,7 +265,7 @@ if uploaded_file and api_key:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
 
-                # 將本筆紀錄默默推入全站共用歷史清單最前方
+                # 將本筆紀錄默默推入全站共用歷史清單最前方（只留必要資訊）
                 st.session_state.global_history.insert(
                     0,
                     {
@@ -272,8 +276,6 @@ if uploaded_file and api_key:
                             if doc_type == "BENQ_COMPARE"
                             else "力智半導體"
                         ),
-                        "excel_bytes": excel_bytes,
-                        "file_name_out": file_name_out,
                     },
                 )
 
