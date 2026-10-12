@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from datetime import datetime
 from google import genai
@@ -19,9 +20,33 @@ st.title("📄 Shipping Docs 自動解析工具")
 st.caption("支援供應商: 力智、明基(報單轉換)")
 st.info("💡 提示：若 AI 解析超過 3 分鐘仍未完成，請重新整理網頁並重新上傳檔案進行嘗試。")
 
-# 初始化全站共用的歷史紀錄清單 (存放於 Session 中)
+# 歷史紀錄實體檔案路徑
+HISTORY_FILE = "history.json"
+
+
+def load_history():
+    """從伺服器硬碟讀取歷史紀錄"""
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+
+def save_history(history_list):
+    """將歷史紀錄寫入伺服器硬碟"""
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history_list, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"儲存歷史紀錄失敗: {e}")
+
+
+# 初始化全站共用的歷史紀錄清單 (從檔案讀取)
 if "global_history" not in st.session_state:
-    st.session_state.global_history = []
+    st.session_state.global_history = load_history()
 
 # =========================================================
 # 📂 側邊欄專區：API Key 與 🔒 受密碼保護的管理者紀錄檢視
@@ -47,11 +72,15 @@ if admin_pwd_input == correct_admin_pwd and admin_pwd_input != "":
     if st.session_state.global_history:
         if st.sidebar.button("🗑️ 清空所有紀錄"):
             st.session_state.global_history = []
+            if os.path.exists(HISTORY_FILE):
+                os.remove(HISTORY_FILE)
             st.rerun()
 
         st.sidebar.markdown("---")
         for item in st.session_state.global_history:
-            st.sidebar.text(f"🕒 {item['time']}\n📁 {item['filename']}\n🏷️ {item['doc_type']}")
+            st.sidebar.text(
+                f"🕒 {item['time']}\n📁 {item['filename']}\n🏷️ {item['doc_type']}"
+            )
             st.sidebar.markdown("---")
     else:
         st.sidebar.info("目前尚無任何上傳解析紀錄。")
@@ -203,83 +232,3 @@ if uploaded_file and api_key:
                         try:
                             response = client.models.generate_content(
                                 model=model_name,
-                                contents=[
-                                    types.Part.from_bytes(
-                                        data=file_bytes, mime_type=mime_type
-                                    ),
-                                    prompt,
-                                ],
-                            )
-                            if response and response.text:
-                                break
-                        except Exception as e:
-                            last_error = e
-                            err_msg = str(e)
-                            if (
-                                "503" in err_msg
-                                or "UNAVAILABLE" in err_msg
-                                or "429" in err_msg
-                            ):
-                                time.sleep(2)
-                                continue
-                            else:
-                                break
-                    if response and response.text:
-                        break
-
-                if not response or not response.text:
-                    raise last_error
-
-                clean_json = (
-                    response.text.replace("```json", "")
-                    .replace("```", "")
-                    .strip()
-                )
-                raw_data = json.loads(clean_json)
-                doc_type = raw_data.get("document_type", "UPI_SEMICONDUCTOR")
-
-                # =========================================================
-                # 處理轉換結果
-                # =========================================================
-                if doc_type == "BENQ_COMPARE":
-                    df_compare, excel_bytes = process_benq_compare(raw_data)
-                    file_name_out = "報單比對.xlsx"
-                    preview_df = df_compare
-                    st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
-                else:
-                    df_inv, df_pack, excel_bytes = process_upi_semiconductor(
-                        raw_data
-                    )
-                    file_name_out = f"Parsed_{uploaded_file.name}.xlsx"
-                    preview_df = df_inv
-                    st.success("✅ 自動辨識為 **力智/半導體** 格式！")
-
-                # 顯示當次解析預覽與下載按鈕（一般使用者維持正常下載自己的結果）
-                st.subheader("📋 解析結果預覽")
-                st.dataframe(preview_df, use_container_width=True)
-
-                st.download_button(
-                    label=f"📥 下載產出的 Excel 檔案 ({file_name_out})",
-                    data=excel_bytes,
-                    file_name=file_name_out,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-
-                # 將本筆紀錄默默推入全站共用歷史清單最前方（只留必要資訊）
-                st.session_state.global_history.insert(
-                    0,
-                    {
-                        "time": upload_time_str,
-                        "filename": uploaded_file.name,
-                        "doc_type": (
-                            "BENQ 報單比對"
-                            if doc_type == "BENQ_COMPARE"
-                            else "力智半導體"
-                        ),
-                    },
-                )
-
-                st.success("解析成功！")
-
-            except Exception as e:
-                st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
