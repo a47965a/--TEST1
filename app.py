@@ -183,8 +183,3 @@ if uploaded_file and api_key:
                                 time.sleep(2)
                                 continue
                             else:
-                                break
-                    if response and response.text:
-                        break
-
-                if not
