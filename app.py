@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from google import genai
 from google.genai import types
 import streamlit as st
@@ -105,7 +105,12 @@ if uploaded_file and api_key:
                 client = genai.Client(api_key=api_key)
                 file_bytes = uploaded_file.read()
                 mime_type = uploaded_file.type
-                upload_time_str = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+
+                # 取得台灣時間 (UTC+8)
+                taiwan_tz = timezone(timedelta(hours=8))
+                upload_time_str = datetime.now(taiwan_tz).strftime(
+                    "%Y/%m/%d %H:%M:%S"
+                )
 
                 prompt = f"""
                 你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
