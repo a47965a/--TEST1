@@ -105,26 +105,41 @@ if uploaded_file and api_key:
                 mime_type = uploaded_file.type
                 upload_time_str = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
 
-                prompt = """
-                你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
-                請閱讀這份文件，判斷文件屬於哪種格式 (document_type)：
-
-                【格式 A：BENQ_COMPARE】
-                若為 BENQ (明基材料) 的 Commercial Invoice 或海關出口報單 (含有 CW 報單號碼、GOODS NO、或 C5790 監管編號)：
-                
-                ⚠️ 跨頁與欄位讀取規則：
-                1. 跨頁拼接與 BOM No 對齊：
-                   - 當報單跨頁時 (如第1頁跨第2頁)，請務必將第1頁最底部項次 (項次3) 與第2頁頂部的續文 (如 "FILM_HC_HWP+QWP+LCF/TK") 完美拼接在一起。
-                   - 第2頁頂部的 "BOM No. C0115030149" 屬於【項次 3】，請務必歸納至項次 3！項次 4 與 5 若原文無 BOM No 則填 null。
-                2. 欄位純淨擷取：
-                   - "Item No": 提取 S/N: 後方的料號 (如 5K.NW6A3.516)。
-                   - "*Item Description": 提取欄位(33)該項次的完整品名規格與產地字樣 (若是跨頁項次請完整拼接)。
-
-                請回傳 JSON Object 格式如下：
-                {
-                  "document_type": "BENQ_COMPARE",
-                  "compare_data": [
-                    {
-                      "*貨物編號": "出口字號 (如 CB9PF260772)",
-                      "*出口項次": 項次數字 (1, 2, 3, 4, 5...請按報單原始項次),
-                      "*出口報單號碼": "報單號碼 (請提取 CW 150
+                prompt = (
+                    "你是一個專業的半導體與電子零件 Shipping Docs 解析專家。\n"
+                    "請閱讀這份文件，判斷文件屬於哪種格式 (document_type)：\n\n"
+                    "【格式 A：BENQ_COMPARE】\n"
+                    "若為 BENQ (明基材料) 的 Commercial Invoice 或海關出口報單 (含有 CW 報單號碼、GOODS NO、或 C5790 監管編號)：\n"
+                    "1. 跨頁拼接與 BOM No 對齊：當報單跨頁時，請務必將第1頁最底部項次與第2頁頂部的續文完美拼接在一起。第2頁頂部的 BOM No. 屬於該項次，請務必歸納正確。\n"
+                    "2. 欄位純淨擷取：Item No 提取 S/N 後方料號，Item Description 提取完整品名規格與產地。\n\n"
+                    "請回傳 JSON Object 格式如下：\n"
+                    "{\n"
+                    '  "document_type": "BENQ_COMPARE",\n'
+                    '  "compare_data": [\n'
+                    "    {\n"
+                    '      "*貨物編號": "出口字號",\n'
+                    '      "*出口項次": 數字,\n'
+                    '      "*出口報單號碼": "報單號碼",\n'
+                    '      "*報關日期": "YYYY/MM/DD",\n'
+                    '      "Item No": "料號",\n'
+                    '      "*Item Description": "品名規格內容",\n'
+                    '      "*Unit": "單位",\n'
+                    '      "*Quantity": 數量數字,\n'
+                    '      "*統計方式": "代碼",\n'
+                    '      "*匯率": 匯率數字,\n'
+                    '      "核銷進口報單號碼": null,\n'
+                    '      "進口項次": null,\n'
+                    '      "BOM No": "BOM編號或null",\n'
+                    '      "保稅": "YB或NB",\n'
+                    '      "監管編號": "C5790",\n'
+                    '      "報單類別": "類別代碼",\n'
+                    '      "單價": 單價數字\n'
+                    "    }\n"
+                    "  ]\n"
+                    "}\n\n"
+                    "【格式 B：UPI_SEMICONDUCTOR】\n"
+                    "若為力智 (uPI) 或一般半導體/IC 廠商的 Invoice / Packing List：\n"
+                    "請將 INVOICE 與 PACKING LIST 明細資料分開擷取，回傳 JSON Object 格式如下：\n"
+                    "{\n"
+                    '  "document_type": "UPI_SEMICONDUCTOR",\n'
+                    '  "invoice_data":
