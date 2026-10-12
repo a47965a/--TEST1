@@ -98,7 +98,7 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file and api_key:
     if st.button("🚀 開始解析", type="primary"):
-        with st.spinner("AI 正在深度解析文件，並自動辨識格式處理中..."):
+        with st.spinner("AI 正在深度解析文件，伺服器擁塞時將自動重試..."):
             try:
                 client = genai.Client(api_key=api_key)
                 file_bytes = uploaded_file.read()
@@ -116,19 +116,53 @@ if uploaded_file and api_key:
                     "注意事項：數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。"
                 )
 
-                # 使用最新自動對應的 Flash 穩定模型代稱
-                response = client.models.generate_content(
-                    model="gemini-flash-latest",
-                    contents=[
-                        types.Part.from_bytes(
-                            data=file_bytes, mime_type=mime_type
-                        ),
-                        prompt,
-                    ],
-                )
+                # 定義備用模型清單（優先使用最新一代，依序備援）
+                models_to_try = [
+                    "gemini-3.8-flash",
+                    "gemini-3.7-flash",
+                    "gemini-3.6-flash",
+                ]
+
+                response = None
+                last_error = None
+
+                # 迴圈自動切換模型與重試
+                for model_name in models_to_try:
+                    success_for_this_model = False
+                    for attempt in range(3):  # 每個模型最多重試 3 次
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=[
+                                    types.Part.from_bytes(
+                                        data=file_bytes, mime_type=mime_type
+                                    ),
+                                    prompt,
+                                ],
+                            )
+                            if response and response.text:
+                                success_for_this_model = True
+                                break
+                        except Exception as e:
+                            last_error = e
+                            err_msg = str(e)
+                            # 如果遇到 503 (伺服器過載) 或 429 (頻率限制)，等待幾秒後重試
+                            if (
+                                "503" in err_msg
+                                or "UNAVAILABLE" in err_msg
+                                or "429" in err_msg
+                            ):
+                                time.sleep(3)
+                                continue
+                            else:
+                                break  其他非擁塞錯誤直接跳到下個模型
+                    if success_for_this_model:
+                        break
 
                 if not response or not response.text:
-                    raise Exception("AI 未能回傳有效結果，請重新嘗試。")
+                    raise Exception(
+                        f"所有模型嘗試皆失敗，請稍候再試。最後錯誤：{last_error}"
+                    )
 
                 clean_json = (
                     response.text.replace("```json", "")
