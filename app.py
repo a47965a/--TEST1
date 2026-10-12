@@ -105,7 +105,7 @@ if uploaded_file and api_key:
                 mime_type = uploaded_file.type
                 upload_time_str = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
 
-                prompt = f"""
+                prompt = """
                 你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
                 請閱讀這份文件，判斷文件屬於哪種格式 (document_type)：
 
@@ -121,114 +121,10 @@ if uploaded_file and api_key:
                    - "*Item Description": 提取欄位(33)該項次的完整品名規格與產地字樣 (若是跨頁項次請完整拼接)。
 
                 請回傳 JSON Object 格式如下：
-                {{
+                {
                   "document_type": "BENQ_COMPARE",
                   "compare_data": [
-                    {{
+                    {
                       "*貨物編號": "出口字號 (如 CB9PF260772)",
                       "*出口項次": 項次數字 (1, 2, 3, 4, 5...請按報單原始項次),
-                      "*出口報單號碼": "報單號碼 (請提取 CW 150A7 14001，勿包含斜線 // )",
-                      "*報關日期": "報關日期 YYYY/MM/DD (民國年請轉西元，如 115/10/08 轉為 2026/10/08)",
-                      "Item No": "S/N: 後方的料號 (如 5K.NW6A3.516)",
-                      "*Item Description": "品名規格內容",
-                      "*Unit": "單位轉大寫 (如 MTR, PCE, PCS)",
-                      "*Quantity": 數量數字,
-                      "*統計方式": "統計方式代碼 (請務必回傳字串如 '02', '53')",
-                      "*匯率": 匯率數字 (如 31.73),
-                      "核銷進口報單號碼": null,
-                      "進口項次": null,
-                      "BOM No": "BOM No. (項次3為 C0115030149，無則填 null)",
-                      "保稅": "稅則號別正下方的【保稅貨物註記】(精準填入 'YB' 或 'NB')",
-                      "監管編號": "C5790",
-                      "報單類別": "表頭欄位(2)報單類別代碼 (例如 'B9')",
-                      "單價": 單價數字
-                    }}
-                  ]
-                }}
-
-                【格式 B：UPI_SEMICONDUCTOR】
-                若為力智 (uPI) 或一般半導體/IC 廠商的 Invoice / Packing List：
-                請將 INVOICE 與 PACKING LIST 明細資料分開擷取，回傳 JSON Object 格式如下：
-                {{
-                  "document_type": "UPI_SEMICONDUCTOR",
-                  "invoice_data": [
-                    {{
-                      "頁碼": "...",
-                      "發票號碼": "...",
-                      "型號": "...",
-                      "封裝規格": "...",
-                      "PO單號": "...",
-                      "項次": "...",
-                      "數量": 數字,
-                      "單價": 數字,
-                      "總價": 數字,
-                      "發票總金額": 數字(僅在最後一筆顯示)
-                    }}
-                  ],
-                  "packing_data": [
-                    {{
-                      "頁碼": "...",
-                      "LIST NO/單號": "...",
-                      "型號": "...",
-                      "封裝規格": "...",
-                      "PO單號": "...",
-                      "項次": "...",
-                      "數量": 數字,
-                      "總 GW (KGS)": 數字(僅在最後一筆顯示),
-                      "總 NW (KGS)": 數字(僅在最後一筆顯示)
-                    }}
-                  ]
-                }}
-
-                注意事項：
-                - 數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。
-                - 請嚴格回傳純 JSON Object，不要包含 Markdown 標記 (如 ```json )。
-                """
-
-                # 動態搜尋與嘗試模型
-                available_models = []
-                try:
-                    for m in client.models.list():
-                        m_name = (
-                            m.name.replace("models/", "")
-                            if hasattr(m, "name")
-                            else str(m)
-                        )
-                        if (
-                            hasattr(m, "supported_generation_methods")
-                            and "generateContent"
-                            in m.supported_generation_methods
-                        ):
-                            available_models.append(m_name)
-                        elif not hasattr(m, "supported_generation_methods"):
-                            available_models.append(m_name)
-                except Exception:
-                    available_models = [
-                        "gemini-2.5-flash",
-                        "gemini-2.0-flash",
-                        "gemini-1.5-flash",
-                    ]
-
-                flash_models = [
-                    m for m in available_models if "flash" in m.lower()
-                ]
-                other_models = [
-                    m for m in available_models if "flash" not in m.lower()
-                ]
-                models_to_try = flash_models + other_models
-
-                if not models_to_try:
-                    models_to_try = [
-                        "gemini-2.5-flash",
-                        "gemini-2.0-flash",
-                        "gemini-1.5-flash",
-                    ]
-
-                response = None
-                last_error = None
-
-                for model_name in models_to_try:
-                    for attempt in range(2):
-                        try:
-                            response = client.models.generate_content(
-                                model=model_name,
+                      "*出口報單號碼": "報單號碼 (請提取 CW 150
