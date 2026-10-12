@@ -106,40 +106,85 @@ if uploaded_file and api_key:
                 upload_time_str = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
 
                 prompt = (
-                    "你是一個專業的半導體與電子零件 Shipping Docs 解析專家。\n"
+                    "你是一個專業的半導體與電子零件 Shipping Docs 解析專家。"
                     "請閱讀這份文件，判斷文件屬於哪種格式 (document_type)：\n\n"
                     "【格式 A：BENQ_COMPARE】\n"
                     "若為 BENQ (明基材料) 的 Commercial Invoice 或海關出口報單 (含有 CW 報單號碼、GOODS NO、或 C5790 監管編號)：\n"
-                    "1. 跨頁拼接與 BOM No 對齊：當報單跨頁時，請務必將第1頁最底部項次與第2頁頂部的續文完美拼接在一起。第2頁頂部的 BOM No. 屬於該項次，請務必歸納正確。\n"
+                    "1. 跨頁拼接與 BOM No 對齊：當報單跨頁時，請務必將第1頁最底部項次與第2頁頂部的續文完美拼接在一起。\n"
                     "2. 欄位純淨擷取：Item No 提取 S/N 後方料號，Item Description 提取完整品名規格與產地。\n\n"
-                    "請回傳 JSON Object 格式如下：\n"
-                    "{\n"
-                    '  "document_type": "BENQ_COMPARE",\n'
-                    '  "compare_data": [\n'
-                    "    {\n"
-                    '      "*貨物編號": "出口字號",\n'
-                    '      "*出口項次": 數字,\n'
-                    '      "*出口報單號碼": "報單號碼",\n'
-                    '      "*報關日期": "YYYY/MM/DD",\n'
-                    '      "Item No": "料號",\n'
-                    '      "*Item Description": "品名規格內容",\n'
-                    '      "*Unit": "單位",\n'
-                    '      "*Quantity": 數量數字,\n'
-                    '      "*統計方式": "代碼",\n'
-                    '      "*匯率": 匯率數字,\n'
-                    '      "核銷進口報單號碼": null,\n'
-                    '      "進口項次": null,\n'
-                    '      "BOM No": "BOM編號或null",\n'
-                    '      "保稅": "YB或NB",\n'
-                    '      "監管編號": "C5790",\n'
-                    '      "報單類別": "類別代碼",\n'
-                    '      "單價": 單價數字\n'
-                    "    }\n"
-                    "  ]\n"
-                    "}\n\n"
-                    "【格式 B：UPI_SEMICONDUCTOR】\n"
-                    "若為力智 (uPI) 或一般半導體/IC 廠商的 Invoice / Packing List：\n"
-                    "請將 INVOICE 與 PACKING LIST 明細資料分開擷取，回傳 JSON Object 格式如下：\n"
-                    "{\n"
-                    '  "document_type": "UPI_SEMICONDUCTOR",\n'
-                    '  "invoice_data":
+                    "請回傳純 JSON Object 格式，包含 document_type 與 compare_data 或 invoice_data/packing_data。\n"
+                    "注意事項：數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。"
+                )
+
+                # 動態搜尋與嘗試模型
+                available_models = []
+                try:
+                    for m in client.models.list():
+                        m_name = (
+                            m.name.replace("models/", "")
+                            if hasattr(m, "name")
+                            else str(m)
+                        )
+                        if (
+                            hasattr(m, "supported_generation_methods")
+                            and "generateContent"
+                            in m.supported_generation_methods
+                        ):
+                            available_models.append(m_name)
+                        elif not hasattr(m, "supported_generation_methods"):
+                            available_models.append(m_name)
+                except Exception:
+                    available_models = [
+                        "gemini-2.5-flash",
+                        "gemini-2.0-flash",
+                        "gemini-1.5-flash",
+                    ]
+
+                flash_models = [
+                    m for m in available_models if "flash" in m.lower()
+                ]
+                other_models = [
+                    m for m in available_models if "flash" not in m.lower()
+                ]
+                models_to_try = flash_models + other_models
+
+                if not models_to_try:
+                    models_to_try = [
+                        "gemini-2.5-flash",
+                        "gemini-2.0-flash",
+                        "gemini-1.5-flash",
+                    ]
+
+                response = None
+                last_error = None
+
+                for model_name in models_to_try:
+                    for attempt in range(2):
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=[
+                                    types.Part.from_bytes(
+                                        data=file_bytes, mime_type=mime_type
+                                    ),
+                                    prompt,
+                                ],
+                            )
+                            if response and response.text:
+                                break
+                        except Exception as e:
+                            last_error = e
+                            err_msg = str(e)
+                            if (
+                                "503" in err_msg
+                                or "UNAVAILABLE" in err_msg
+                                or "429" in err_msg
+                            ):
+                                time.sleep(2)
+                                continue
+                            else:
+                                break
+                    if response and response.text:
+                        break
+
+                if not
