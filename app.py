@@ -17,13 +17,48 @@ st.set_page_config(
 
 st.title("📄 Shipping Docs 自動解析工具")
 st.caption("支援供應商: 力智、明基(報單轉換)")
-st.info("💡 提示：若解析超過 3 分鐘仍未完成，請重新整理網頁並重新上傳檔案進行嘗試。")
+st.info("💡 提示：若 AI 解析超過 3 分鐘仍未完成，請重新整理網頁並重新上傳檔案進行嘗試。")
 
+# 初始化全站共用的歷史紀錄清單 (存放於 Session 中)
+if "global_history" not in st.session_state:
+    st.session_state.global_history = []
+
+# =========================================================
+# 📂 側邊欄專區（一般使用者只看到 API Key，管理者可展開歷史紀錄）
+# =========================================================
 # 讀取 Secrets 中的 API Key，若無則從 Sidebar 輸入
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 if not api_key:
     api_key = st.sidebar.text_input("輸入 Gemini API Key", type="password")
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("👑 管理者專區")
+show_admin_history = st.sidebar.checkbox("顯示所有使用者的上傳歷史紀錄")
+
+if show_admin_history:
+    st.sidebar.markdown("### 📊 歷史紀錄清單")
+    if st.session_state.global_history:
+        if st.sidebar.button("🗑️ 清空所有歷史"):
+            st.session_state.global_history = []
+            st.rerun()
+
+        for idx, item in enumerate(st.session_state.global_history):
+            st.sidebar.markdown(f"**[{item['time']}]** `{item['filename']}`")
+            st.sidebar.caption(f"類型: {item['doc_type']}")
+            st.sidebar.download_button(
+                label=f"📥 下載 Excel",
+                data=item["excel_bytes"],
+                file_name=item["file_name_out"],
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"sidebar_download_{idx}",
+            )
+            st.sidebar.markdown("---")
+    else:
+        st.sidebar.info("目前尚無任何上傳解析紀錄。")
+
+# =========================================================
+# 🚀 主畫面：檔案上傳與解析
+# =========================================================
 uploaded_file = st.file_uploader(
     "選擇 PDF 或圖片檔案", type=["pdf", "png", "jpg", "jpeg"]
 )
@@ -35,7 +70,7 @@ if uploaded_file and api_key:
                 client = genai.Client(api_key=api_key)
                 file_bytes = uploaded_file.read()
                 mime_type = uploaded_file.type
-                upload_date_str = datetime.now().strftime("%Y/%m/%d")
+                upload_time_str = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
 
                 prompt = f"""
                 你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
@@ -113,7 +148,7 @@ if uploaded_file and api_key:
                 }}
 
                 注意事項：
-                - 數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。
+                - 數量, 單價, 總價等數值欄位請回傳純數字 (不要加千分位逗號)。
                 - 請嚴格回傳純 JSON Object，不要包含 Markdown 標記 (如 ```json )。
                 """
 
@@ -200,42 +235,49 @@ if uploaded_file and api_key:
                 doc_type = raw_data.get("document_type", "UPI_SEMICONDUCTOR")
 
                 # =========================================================
-                # 呼叫 parsers 模組處理邏輯
+                # 處理轉換結果
                 # =========================================================
                 if doc_type == "BENQ_COMPARE":
-                    st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
                     df_compare, excel_bytes = process_benq_compare(raw_data)
-
-                    st.subheader("📋 報單比對 17 欄位預覽")
-                    st.dataframe(df_compare, use_container_width=True)
-
-                    st.download_button(
-                        label="📥 下載報單比對 Excel (.xlsx)",
-                        data=excel_bytes,
-                        file_name="報單比對.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-
+                    file_name_out = "報單比對.xlsx"
+                    preview_df = df_compare
+                    st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
                 else:
-                    st.success("✅ 自動辨識為 **力智/半導體** 格式！")
                     df_inv, df_pack, excel_bytes = process_upi_semiconductor(
                         raw_data
                     )
+                    file_name_out = f"Parsed_{uploaded_file.name}.xlsx"
+                    preview_df = df_inv
+                    st.success("✅ 自動辨識為 **力智/半導體** 格式！")
 
-                    st.subheader("🧾 Invoice（發票）解析結果預覽")
-                    st.dataframe(df_inv, use_container_width=True)
+                # 顯示當次解析預覽與下載按鈕
+                st.subheader("📋 解析結果預覽")
+                st.dataframe(preview_df, use_container_width=True)
 
-                    st.subheader("📦 Packing List（裝箱單）解析結果預覽")
-                    st.dataframe(df_pack, use_container_width=True)
+                st.download_button(
+                    label=f"📥 下載產出的 Excel 檔案 ({file_name_out})",
+                    data=excel_bytes,
+                    file_name=file_name_out,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
 
-                    st.download_button(
-                        label="📥 下載多頁籤 Excel 檔案 (.xlsx)",
-                        data=excel_bytes,
-                        file_name=f"Parsed_{uploaded_file.name}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
+                # 將本筆紀錄默默推入全站共用歷史清單最前方
+                st.session_state.global_history.insert(
+                    0,
+                    {
+                        "time": upload_time_str,
+                        "filename": uploaded_file.name,
+                        "doc_type": (
+                            "BENQ 報單比對"
+                            if doc_type == "BENQ_COMPARE"
+                            else "力智半導體"
+                        ),
+                        "excel_bytes": excel_bytes,
+                        "file_name_out": file_name_out,
+                    },
+                )
 
-                st.success("解析成功！已依據文件格式產出對應 Excel 檔案。")
+                st.success("解析成功！")
 
             except Exception as e:
                 st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
