@@ -118,9 +118,9 @@ if uploaded_file and api_key:
 
                 # 定義備用模型清單（優先使用最新一代，依序備援）
                 models_to_try = [
-                    "gemini-3.8-flash",
-                    "gemini-3.7-flash",
-                    "gemini-3.6-flash",
+                    "gemini-2.5-flash",
+                    "gemini-2.0-flash",
+                    "gemini-1.5-flash",
                 ]
 
                 response = None
@@ -155,7 +155,7 @@ if uploaded_file and api_key:
                                 time.sleep(3)
                                 continue
                             else:
-                                break  其他非擁塞錯誤直接跳到下個模型
+                                break  # 其他非擁塞錯誤直接跳到下個模型
                     if success_for_this_model:
                         break
 
