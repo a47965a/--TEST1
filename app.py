@@ -116,9 +116,9 @@ if uploaded_file and api_key:
                     "注意事項：數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。"
                 )
 
-                # 使用更新後的最新模型
+                # 使用最新自動對應的 Flash 穩定模型代稱
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-flash-latest",
                     contents=[
                         types.Part.from_bytes(
                             data=file_bytes, mime_type=mime_type
