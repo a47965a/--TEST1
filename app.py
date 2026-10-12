@@ -1,5 +1,4 @@
 import json
-import os
 import time
 from datetime import datetime
 from google import genai
@@ -12,207 +11,232 @@ from parsers.upi_parser import process_upi_semiconductor
 
 # 1. 頁面基本設定
 st.set_page_config(
-    page_title="Shipping Docs 自動解析工具",
-    layout="wide",
+page_title="Shipping Docs 自動解析工具",
+layout="wide",
 )
 
 st.title("📄 Shipping Docs 自動解析工具")
 st.caption("支援供應商: 力智、明基(報單轉換)")
 st.info("💡 提示：若 AI 解析超過 3 分鐘仍未完成，請重新整理網頁並重新上傳檔案進行嘗試。")
+st.info("💡 提示：若解析超過 3 分鐘仍未完成，請重新整理網頁並重新上傳檔案進行嘗試。")
 
-# 歷史紀錄實體檔案路徑
-HISTORY_FILE = "history.json"
-
-
-def load_history():
-    """從伺服器硬碟讀取歷史紀錄"""
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
-
-
-def save_history(history_list):
-    """將歷史紀錄寫入伺服器硬碟"""
-    try:
-        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history_list, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"儲存歷史紀錄失敗: {e}")
-
-
-# 初始化全站共用的歷史紀錄清單 (從檔案讀取)
-if "global_history" not in st.session_state:
-    st.session_state.global_history = load_history()
-
-# =========================================================
-# 📂 側邊欄專區：API Key 與 🔒 受密碼保護的管理者紀錄檢視
-# =========================================================
 # 讀取 Secrets 中的 API Key，若無則從 Sidebar 輸入
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 if not api_key:
-    api_key = st.sidebar.text_input("輸入 Gemini API Key", type="password")
+api_key = st.sidebar.text_input("輸入 Gemini API Key", type="password")
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("👑 管理者專區")
-
-# 輸入密碼才能解鎖查看紀錄
-admin_pwd_input = st.sidebar.text_input("管理者解鎖密碼", type="password")
-# 從 Secrets 讀取設定的密碼，若無則預設為 "admin123"
-correct_admin_pwd = st.secrets.get("ADMIN_PASSWORD", "admin123")
-
-# 只有密碼正確時才顯示上傳紀錄清單
-if admin_pwd_input == correct_admin_pwd and admin_pwd_input != "":
-    st.sidebar.success("✅ 管理者已解鎖")
-    st.sidebar.markdown("### 📊 使用者上傳紀錄")
-
-    if st.session_state.global_history:
-        if st.sidebar.button("🗑️ 清空所有紀錄"):
-            st.session_state.global_history = []
-            if os.path.exists(HISTORY_FILE):
-                os.remove(HISTORY_FILE)
-            st.rerun()
-
-        st.sidebar.markdown("---")
-        for item in st.session_state.global_history:
-            st.sidebar.text(
-                f"🕒 {item['time']}\n📁 {item['filename']}\n🏷️ {item['doc_type']}"
-            )
-            st.sidebar.markdown("---")
-    else:
-        st.sidebar.info("目前尚無任何上傳解析紀錄。")
-else:
-    if admin_pwd_input != "":
-        st.sidebar.error("❌ 密碼錯誤")
-    st.sidebar.caption("（一般訪客請忽略此區塊）")
-
-# =========================================================
-# 🚀 主畫面：檔案上傳與解析
-# =========================================================
 uploaded_file = st.file_uploader(
-    "選擇 PDF 或圖片檔案", type=["pdf", "png", "jpg", "jpeg"]
+"選擇 PDF 或圖片檔案", type=["pdf", "png", "jpg", "jpeg"]
 )
 
 if uploaded_file and api_key:
-    if st.button("🚀 開始解析", type="primary"):
-        with st.spinner("AI 正在深度解析文件，伺服器擁塞時將自動重試..."):
-            try:
-                client = genai.Client(api_key=api_key)
-                file_bytes = uploaded_file.read()
-                mime_type = uploaded_file.type
-                upload_time_str = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+if st.button("🚀 開始解析", type="primary"):
+with st.spinner("AI 正在深度解析文件，並自動辨識格式處理中..."):
+try:
+client = genai.Client(api_key=api_key)
+file_bytes = uploaded_file.read()
+mime_type = uploaded_file.type
+upload_date_str = datetime.now().strftime("%Y/%m/%d")
 
-                prompt = (
-                    "你是一個專業的半導體與電子零件 Shipping Docs 解析專家。"
-                    "請閱讀這份文件，判斷文件屬於哪種格式 (document_type)：\n\n"
-                    "【格式 A：BENQ_COMPARE】\n"
-                    "若為 BENQ (明基材料) 的 Commercial Invoice 或海關出口報單 (含有 CW 報單號碼、GOODS NO、或 C5790 監管編號)：\n"
-                    "1. 跨頁拼接與 BOM No 對齊：當報單跨頁時，請務必將第1頁最底部項次與第2頁頂部的續文完美拼接在一起。\n"
-                    "2. 欄位純淨擷取：Item No 提取 S/N 後方料號，Item Description 提取完整品名規格與產地。\n\n"
-                    "請回傳純 JSON Object 格式，包含 document_type 與 compare_data 或 invoice_data/packing_data。\n"
-                    "注意事項：數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。"
-                )
+prompt = f"""
+               你是一個專業的半導體與電子零件 Shipping Docs 解析專家。
+               請閱讀這份文件，判斷文件屬於哪種格式 (document_type)：
 
-                # 定義備用模型清單（優先使用最新一代，依序備援）
-                models_to_try = [
-                    "gemini-2.5-flash",
-                    "gemini-2.0-flash",
-                    "gemini-1.5-flash",
-                ]
+               【格式 A：BENQ_COMPARE】
+               若為 BENQ (明基材料) 的 Commercial Invoice 或海關出口報單 (含有 CW 報單號碼、GOODS NO、或 C5790 監管編號)：
+               
+               ⚠️ 跨頁與欄位讀取規則：
+               1. 跨頁拼接與 BOM No 對齊：
+                  - 當報單跨頁時 (如第1頁跨第2頁)，請務必將第1頁最底部項次 (項次3) 與第2頁頂部的續文 (如 "FILM_HC_HWP+QWP+LCF/TK") 完美拼接在一起。
+                  - 第2頁頂部的 "BOM No. C0115030149" 屬於【項次 3】，請務必歸納至項次 3！項次 4 與 5 若原文無 BOM No 則填 null。
+               2. 欄位純淨擷取：
+                  - "Item No": 提取 S/N: 後方的料號 (如 5K.NW6A3.516)。
+                  - "*Item Description": 提取欄位(33)該項次的完整品名規格與產地字樣 (若是跨頁項次請完整拼接)。
 
-                response = None
-                last_error = None
+               請回傳 JSON Object 格式如下：
+               {{
+                 "document_type": "BENQ_COMPARE",
+                 "compare_data": [
+                   {{
+                     "*貨物編號": "出口字號 (如 CB9PF260772)",
+                     "*出口項次": 項次數字 (1, 2, 3, 4, 5...請按報單原始項次),
+                     "*出口報單號碼": "報單號碼 (請提取 CW 150A7 14001，勿包含斜線 // )",
+                     "*報關日期": "報關日期 YYYY/MM/DD (民國年請轉西元，如 115/10/08 轉為 2026/10/08)",
+                     "Item No": "S/N: 後方的料號 (如 5K.NW6A3.516)",
+                     "*Item Description": "品名規格內容",
+                     "*Unit": "單位轉大寫 (如 MTR, PCE, PCS)",
+                     "*Quantity": 數量數字,
+                     "*統計方式": "統計方式代碼 (請務必回傳字串如 '02', '53')",
+                     "*匯率": 匯率數字 (如 31.73),
+                     "核銷進口報單號碼": null,
+                     "進口項次": null,
+                     "BOM No": "BOM No. (項次3為 C0115030149，無則填 null)",
+                     "保稅": "稅則號別正下方的【保稅貨物註記】(精準填入 'YB' 或 'NB')",
+                     "監管編號": "C5790",
+                     "報單類別": "表頭欄位(2)報單類別代碼 (例如 'B9')",
+                     "單價": 單價數字
+                   }}
+                 ]
+               }}
 
-                # 迴圈自動切換模型與重試
-                for model_name in models_to_try:
-                    success_for_this_model = False
-                    for attempt in range(3):  # 每個模型最多重試 3 次
-                        try:
-                            response = client.models.generate_content(
-                                model=model_name,
-                                contents=[
-                                    types.Part.from_bytes(
-                                        data=file_bytes, mime_type=mime_type
-                                    ),
-                                    prompt,
-                                ],
-                            )
-                            if response and response.text:
-                                success_for_this_model = True
-                                break
-                        except Exception as e:
-                            last_error = e
-                            err_msg = str(e)
-                            # 如果遇到 503 (伺服器過載) 或 429 (頻率限制)，等待幾秒後重試
-                            if (
-                                "503" in err_msg
-                                or "UNAVAILABLE" in err_msg
-                                or "429" in err_msg
-                            ):
-                                time.sleep(3)
-                                continue
-                            else:
-                                break  # 其他非擁塞錯誤直接跳到下個模型
-                    if success_for_this_model:
-                        break
+               【格式 B：UPI_SEMICONDUCTOR】
+               若為力智 (uPI) 或一般半導體/IC 廠商的 Invoice / Packing List：
+               請將 INVOICE 與 PACKING LIST 明細資料分開擷取，回傳 JSON Object 格式如下：
+               {{
+                 "document_type": "UPI_SEMICONDUCTOR",
+                 "invoice_data": [
+                   {{
+                     "頁碼": "...",
+                     "發票號碼": "...",
+                     "型號": "...",
+                     "封裝規格": "...",
+                     "PO單號": "...",
+                     "項次": "...",
+                     "數量": 數字,
+                     "單價": 數字,
+                     "總價": 數字,
+                     "發票總金額": 數字(僅在最後一筆顯示)
+                   }}
+                 ],
+                 "packing_data": [
+                   {{
+                     "頁碼": "...",
+                     "LIST NO/單號": "...",
+                     "型號": "...",
+                     "封裝規格": "...",
+                     "PO單號": "...",
+                     "項次": "...",
+                     "數量": 數字,
+                     "總 GW (KGS)": 數字(僅在最後一筆顯示),
+                     "總 NW (KGS)": 數字(僅在最後一筆顯示)
+                   }}
+                 ]
+               }}
 
-                if not response or not response.text:
-                    raise Exception(
-                        f"所有模型嘗試皆失敗，請稍候再試。最後錯誤：{last_error}"
-                    )
+               注意事項：
+               - 數量、單價、總價等數值欄位請回傳純數字 (不要加千分位逗號)。
+               - 請嚴格回傳純 JSON Object，不要包含 Markdown 標記 (如 ```json )。
+               """
 
-                clean_json = (
-                    response.text.replace("```json", "")
-                    .replace("```", "")
-                    .strip()
-                )
-                raw_data = json.loads(clean_json)
-                doc_type = raw_data.get("document_type", "UPI_SEMICONDUCTOR")
+# 動態搜尋與嘗試模型
+available_models = []
+try:
+for m in client.models.list():
+m_name = (
+m.name.replace("models/", "")
+if hasattr(m, "name")
+else str(m)
+)
+if (
+hasattr(m, "supported_generation_methods")
+and "generateContent"
+in m.supported_generation_methods
+):
+available_models.append(m_name)
+elif not hasattr(m, "supported_generation_methods"):
+available_models.append(m_name)
+except Exception:
+available_models = [
+"gemini-2.5-flash",
+"gemini-2.0-flash",
+"gemini-1.5-flash",
+]
 
-                # =========================================================
-                # 處理轉換結果
-                # =========================================================
-                if doc_type == "BENQ_COMPARE":
-                    df_compare, excel_bytes = process_benq_compare(raw_data)
-                    file_name_out = "報單比對.xlsx"
-                    preview_df = df_compare
-                    st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
-                else:
-                    df_inv, df_pack, excel_bytes = process_upi_semiconductor(
-                        raw_data
-                    )
-                    file_name_out = f"Parsed_{uploaded_file.name}.xlsx"
-                    preview_df = df_inv
-                    st.success("✅ 自動辨識為 **力智/半導體** 格式！")
+flash_models = [
+m for m in available_models if "flash" in m.lower()
+]
+other_models = [
+m for m in available_models if "flash" not in m.lower()
+]
+models_to_try = flash_models + other_models
 
-                # 顯示當次解析預覽與下載按鈕
-                st.subheader("📋 解析結果預覽")
-                st.dataframe(preview_df, use_container_width=True)
+if not models_to_try:
+models_to_try = [
+"gemini-2.5-flash",
+"gemini-2.0-flash",
+"gemini-1.5-flash",
+]
 
-                st.download_button(
-                    label=f"📥 下載產出的 Excel 檔案 ({file_name_out})",
-                    data=excel_bytes,
-                    file_name=file_name_out,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+response = None
+last_error = None
 
-                # 將本筆紀錄推入清單並寫入 `history.json`
-                new_record = {
-                    "time": upload_time_str,
-                    "filename": uploaded_file.name,
-                    "doc_type": (
-                        "BENQ 報單比對"
-                        if doc_type == "BENQ_COMPARE"
-                        else "力智半導體"
-                    ),
-                }
-                st.session_state.global_history.insert(0, new_record)
-                save_history(st.session_state.global_history)
+for model_name in models_to_try:
+for attempt in range(2):
+try:
+response = client.models.generate_content(
+model=model_name,
+contents=[
+types.Part.from_bytes(
+data=file_bytes, mime_type=mime_type
+),
+prompt,
+],
+)
+if response and response.text:
+break
+except Exception as e:
+last_error = e
+err_msg = str(e)
+if (
+"503" in err_msg
+or "UNAVAILABLE" in err_msg
+or "429" in err_msg
+):
+time.sleep(2)
+continue
+else:
+break
+if response and response.text:
+break
 
-                st.success("解析成功！")
+if not response or not response.text:
+raise last_error
 
-            except Exception as e:
-                st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
+clean_json = (
+response.text.replace("```json", "")
+.replace("```", "")
+.strip()
+)
+raw_data = json.loads(clean_json)
+doc_type = raw_data.get("document_type", "UPI_SEMICONDUCTOR")
+
+# =========================================================
+# 呼叫 parsers 模組處理邏輯
+# =========================================================
+if doc_type == "BENQ_COMPARE":
+st.success("✅ 自動辨識為 **BENQ/報單比對** 格式！")
+df_compare, excel_bytes = process_benq_compare(raw_data)
+
+st.subheader("📋 報單比對 17 欄位預覽")
+st.dataframe(df_compare, use_container_width=True)
+
+st.download_button(
+label="📥 下載報單比對 Excel (.xlsx)",
+data=excel_bytes,
+file_name="報單比對.xlsx",
+mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+
+else:
+st.success("✅ 自動辨識為 **力智/半導體** 格式！")
+df_inv, df_pack, excel_bytes = process_upi_semiconductor(
+raw_data
+)
+
+st.subheader("🧾 Invoice（發票）解析結果預覽")
+st.dataframe(df_inv, use_container_width=True)
+
+st.subheader("📦 Packing List（裝箱單）解析結果預覽")
+st.dataframe(df_pack, use_container_width=True)
+
+st.download_button(
+label="📥 下載多頁籤 Excel 檔案 (.xlsx)",
+data=excel_bytes,
+file_name=f"Parsed_{uploaded_file.name}.xlsx",
+mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+
+st.success("解析成功！已依據文件格式產出對應 Excel 檔案。")
+
+except Exception as e:
+st.error(f"解析失敗，請確認 API Key 或檔案格式是否正確：{e}")
